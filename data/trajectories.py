@@ -202,8 +202,8 @@ class TrajectoryDataset(Dataset):
     def __len__(self):
         return self.num_seq
 
-    def __getitem__(self, index):
-        start, end = self.seq_start_end[index]
+    def __getitem__(self, index):  # info in one batch.
+        start, end = self.seq_start_end[index]  # trajectories num in one scene  (1,5) => from 1 to 5 is in the same scene
         out = [
             self.obs_traj[start:end, :],
             self.pred_traj[start:end, :],

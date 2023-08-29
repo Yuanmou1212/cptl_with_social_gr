@@ -82,7 +82,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
         for n, p in model.named_parameters():
             if p.requires_grad:
                 n = n.replace('.', '__')
-                model.register_buffer('{}_SI_prev_task'.format(n), p.data.clone())
+                model.register_buffer('{}_SI_prev_task'.format(n), p.data.clone())    # 将初始model参数存入buffer用于调用。
 
     # Loop over all tasks.
     for task, train_dataset in enumerate(train_datasets, 1):
@@ -157,8 +157,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 # loss_mask = out[5].to(device)
 
                 # ------ Exact Replay ----- #
-                if Exact:
-                    if task == 2:
+                if Exact:   # default = False, will skip this replay, but after first task finish, set Exact = True, then we can do replay
+                    if task == 2:   # task start from index 0,.. so it ignore first 2 tasks ?
                         from helper.memory_eth import memory_buff
                         # memory_seq_dset = memory_buff(args)
                         # memory_seq_loader = iter(data_loader(args, memory_seq_dset, args.replay_batch_size, shuffle=True))
@@ -255,10 +255,10 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 # ----> Train Main model
                 if batch_index <= iters*batch_num:
 
-                    # Train the main model with this batch
+                    # Train the main model with this batch     ## ?? train a model 会用 surrogate_loss , first task 怎么解决有的参数不存在的问题？？
                     loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_rel_=x_rel_, y_rel_=y_rel_, seq_start_end_=seq_start_end_, loss_mask=loss_mask, rnt=1./task)
                     main_loss_file = open("{}/loss_main_model_{}_{}_{}_{}.txt".format(args.r_dir, args.iters, args.batch_size, args.replay, args.val_class), 'a')
-                    main_loss_file.write('{}: {}\n'.format(batch_index, loss_dict_main['loss_total']))
+                    main_loss_file.write('{}: {}\n'.format(batch_index, loss_dict_main['loss_total']))  ## ??
                     main_loss_file.close()
                     losses_dict_main['loss_total'].append(loss_dict_main['loss_total'])
                     losses_dict_main['loss_current'].append(loss_dict_main['loss_current'])
@@ -272,7 +272,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                             if p.requires_grad:
                                 n = n.replace('.', '__')
                                 if p.grad is not None:
-                                    W[n].add_(-p.grad * (p.detach() - p_old[n]))
+                                    W[n].add_(-p.grad * (p.detach() - p_old[n]))  ##?? 如何解决self.surrogate_loss() 调用首个task问题，以及W 的问题。
                                 p_old[n] = p.detach().clone()
 
                 # # -----> Train Fake Generator

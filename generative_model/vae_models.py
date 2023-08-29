@@ -8,8 +8,8 @@ from helper.utils import relative_to_abs
 
 def make_mlp(dim_list, activation='relu', batch_norm=True, dropout=0):
     layers = []
-    for dim_in, dim_out in zip(dim_list[:-1], dim_list[1:]):
-        layers.append(nn.Linear(dim_in, dim_out))
+    for dim_in, dim_out in zip(dim_list[:-1], dim_list[1:]): # dim_list means layers neuron number. eg: [64,128,356,128,64]
+        layers.append(nn.Linear(dim_in, dim_out))            # define a layer needs input num and output num , so 连续两个为一组的生成layer
         if batch_norm:
             layers.append(nn.BatchNorm1d(dim_out))
         if activation == 'relu':
@@ -18,15 +18,15 @@ def make_mlp(dim_list, activation='relu', batch_norm=True, dropout=0):
             layers.append(nn.LeakyReLU())
         if dropout > 0:
             layers.append(nn.Dropout(p=dropout))
-    return nn.Sequential(*layers)
+    return nn.Sequential(*layers)   # * 解包，从list 中，把元素释放出来，作为sequential的输入
 
-class PoolHiddenNet(nn.Module):
+class PoolHiddenNet(nn.Module):   # should be social encoder part.(FC+pooling)
     '''Pooling module as proposed in social-gan'''
     def __init__(
             self, embedding_dim=64, h_dim=64, mlp_dim=1024, bottleneck_dim=1024,
             activation='relu', batch_norm=True, dropout=0.0
     ):
-        super(PoolHiddenNet, self).__init__()
+        super(PoolHiddenNet, self).__init__()  # 调用父类 nn.Module 的构造函数，确保在子类的构造函数中也执行了父类的初始化操作
 
         self.mlp_dim = mlp_dim
         self.h_dim = h_dim
@@ -36,50 +36,50 @@ class PoolHiddenNet(nn.Module):
         mlp_pre_dim = embedding_dim + h_dim
         mlp_pre_pool_dims = [mlp_pre_dim, self.mlp_dim, bottleneck_dim]
 
-        self.spatial_embedding = nn.Linear(2, embedding_dim)
+        self.spatial_embedding = nn.Linear(2, embedding_dim)  # input x,y 2 dimension
         self.mlp_pre_pool = make_mlp(
             mlp_pre_pool_dims,
             activation=activation,
             batch_norm=batch_norm,
             dropout=dropout)
 
-    def repeat(self, tensor, num_reps):
+    def repeat(self, tensor, num_reps):    # 这个方法用于将输入的张量在第一维上进行重复，以构建不同维度的重复数据。主要用于在计算相对位置时进行数据复制
         """
         Inputs:
-        -tensor: 2D tensor of any shape
+        -tensor: 2D tensor of any shape        #我理解为 dim time, dim features(x,y)  写成2D(t,f)
         -num_reps: Number of times to repeat each row
         Outpus:
-        -repeat_tensor: Repeat each row such that: R1, R1, R2, R2
+        -repeat_tensor: Repeat each row such that: R1, R1, R2, R2    #  ((x0,y0);(x0,y0);(x1,y1);(x1,y1))  0,1 means time, repeat for calculate relative
         """
-        col_len = tensor.size(1)
-        tensor = tensor.unsqueeze(dim=1).repeat(1, num_reps, 1)
-        tensor = tensor.view(-1, col_len)
+        col_len = tensor.size(1)  # when 2D ， size 1 is col。 when 3 D size 1 is row
+        tensor = tensor.unsqueeze(dim=1).repeat(1, num_reps, 1)   # unsqueeze get 3D (t,1,f), repeat get 3D (t,num,f), 由于从右开始看 row 对应num， col 对应 f， 所以会说是repeat row
+        tensor = tensor.view(-1, col_len) # size(num*t, f)
         return tensor
 
-    def forward(self, h_states, seq_start_end, end_pos):
+    def forward(self, h_states, seq_start_end, end_pos):       ## ?  h_states might not comes from Class Predictor, which forward() doesn't provide h_states, only provides position output
         """
         Inputs:
-        - h_states: Tensor of shape (num_layers, batch, h_dim)
-        - seq_start_end: A list of tuples which delimit sequences within batch
+        - h_states: Tensor of shape (num_layers, batch, h_dim)    一个batch一个batch的输入   ??cause we use nn.LSTMCell I guess num_layers = 1
+        - seq_start_end: A list of tuples which delimit sequences within batch    #在批处理中分隔序列的元组列表# 这个batch输入的所有trajectories的第一条起点index和最后一条终点index。。 切片操作是基于 seq_start_end 中的 start 和 end 索引进行的,它指定了当前轨迹序列在展平后的2D张量中的起始和结束位置。
         - end_pos: Tensor of shape (batch, 2)
         Output:
         - pool_h: Tensor of shape (batch, bottleneck_dim)
         """
         pool_h = []
-        for _, (start, end) in enumerate(seq_start_end):
+        for _, (start, end) in enumerate(seq_start_end):   # [(start, end),(start, end),..]   是3D 转 2D 后的 tensor的对应start， end index。
             start = start.item()
             end = end.item()
-            num_ped = end - start
+            num_ped = end - start    # ped pedestrain 可以得到当前轨迹序列中的行人数量， 所以一个循环处理的是这个batch中的所有trajectory
             if num_ped > 1:
-                curr_hidden = h_states.view(-1, self.h_dim)[start:end]
-                curr_end_pos = end_pos[start:end]
-                # Repeat -> H1, H2, H1, H2
-                curr_hidden_1 = curr_hidden.repeat(num_ped, 1)
+                curr_hidden = h_states.view(-1, self.h_dim)[start:end]  # (num_layers * batch, h_dim)  不同的start 和end 引起不同的loop， 从而代表不同的trajectory
+                curr_end_pos = end_pos[start:end]                       ## ？？ How to make sure index "start" "end" corresponding the same part of h_states and end_pos
+                # Repeat -> H1, H2, H1, H2   增加行， 有多少行人，复制多少次
+                curr_hidden_1 = curr_hidden.repeat(num_ped, 1) 
                 # Repeat position -> P1, P2, P1, P2
                 curr_end_pos_1 = curr_end_pos.repeat(num_ped, 1)
                 # Repeat position -> P1, P1, P2, P2
-                curr_end_pos_2 = self.repeat(curr_end_pos, num_ped)
-                curr_rel_pos = curr_end_pos_1 - curr_end_pos_2
+                curr_end_pos_2 = self.repeat(curr_end_pos, num_ped)    # num_ped is changing during for loop, why??  因为每个batch的行人数量不一定一样
+                curr_rel_pos = curr_end_pos_1 - curr_end_pos_2         # relative position!
                 curr_rel_embedding = self.spatial_embedding(curr_rel_pos)
                 mlp_h_input = torch.cat([curr_rel_embedding, curr_hidden_1], dim=1)
                 curr_pool_h = self.mlp_pre_pool(mlp_h_input)

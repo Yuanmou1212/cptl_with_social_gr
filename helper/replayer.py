@@ -1,4 +1,4 @@
-import abc
+import abc   # abstract base classes
 from torch import nn
 
 class Replayer(nn.Module, metaclass=abc.ABCMeta):
@@ -18,11 +18,11 @@ class Replayer(nn.Module, metaclass=abc.ABCMeta):
         self.KD_temp = 2.
 
     def _device(self):
-        return next(self.parameters()).device
+        return next(self.parameters()).device  # next 获得iterator中下一个的参数， 从而知道params存在哪儿
 
     def _is_on_cuda(self):
         return next(self.parameters()).is_cuda
 
-    @abc.abstractmethod
+    @abc.abstractmethod # decorator  装饰器， 让forward成为 抽象函数，正在抽象类中不用写，必须在继承它的子类里面写
     def forward(self, x):
         pass
