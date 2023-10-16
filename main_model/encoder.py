@@ -8,7 +8,7 @@ from helper.replayer import Replayer
 from helper.continual_learner import ContinualLearner
 from helper.utils import l2_loss
 
-def get_noise(shape, noise_type):
+def get_noise(shape, noise_type):      # 噪音有助于使 VAE 更鲁棒，更好地捕获数据分布的结构，并且有助于生成更多多样性的样本, but 这里是 LSTM 啊，不是要生成单一路径吗？
     if noise_type == "gaussian":
         return torch.randn(*shape).cuda()  # * 解包操作，tuple（2，3） 经 * =》 2,3
     elif noise_type == "uniform":
@@ -29,15 +29,16 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
             traj_lstm_output_size,
             dropout=0,
             noise_dim=(8,),
-            noise_type="gaussian",
+            noise_type="gaussian",        # predict 为什么要noise？
     ):
-        super().__init__()
-        self.label = "lstm"
-        self.obs_len = obs_len
+        super().__init__()                # 这一步在调用父类的初始化函数，但不需要传入值
+
+        self.label = "lstm"             # 这些不是对父类传值，而是对本class predictor 传入值。
+        self.obs_len = obs_len          # 从本class 的传入值 传递到self 内的attribute
         self.pred_len = pred_len
-        self.traj_lstm_input_size = traj_lstm_input_size
-        self.traj_lstm_hidden_size = traj_lstm_hidden_size
-        self.traj_lstm_output_size = traj_lstm_output_size
+        self.traj_lstm_input_size = traj_lstm_input_size   # default  是2 
+        self.traj_lstm_hidden_size = traj_lstm_hidden_size  # args的 default 32
+        self.traj_lstm_output_size = traj_lstm_output_size  # default 32
 
         self.noise_dim = noise_dim
         self.noise_type = noise_type
@@ -56,7 +57,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
     def init_encoder_traj_lstm(self, batch):
         return (
             torch.randn(batch, self.traj_lstm_hidden_size).cuda(),
-            torch.randn(batch, self.traj_lstm_hidden_size).cuda(),
+            torch.randn(batch, self.traj_lstm_hidden_size).cuda(),     # intialize hidden_state and cell_state
         )
     # initial decoder traj lstm hidden states
     def init_decoder_traj_lstm(self, batch):
@@ -66,7 +67,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
         )
 
     # add noise before decoder
-    def add_noise(self, _input):
+    def add_noise(self, _input):           # 没用这个，用的另一个get_noise
         noise_shape = (_input.size(0),) + self.noise_dim
         z_decoder = get_noise(noise_shape, self.noise_type)
         decoder_h = torch.cat([_input, z_decoder], dim=1)
@@ -74,12 +75,13 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
 
 
     @property
-    def name(self):
-        return "{}".format("lstm")
+    def name(self):   # 外界调用的attri，显示用的什么方法。
+        return "{}".format("lstm")  
 
-    def forward(self, obs_traj_pos, seq_start_end):
-        batch = obs_traj_pos.shape[1] #todo define the batch
-        traj_lstm_h_t, traj_lstm_c_t = self.init_encoder_traj_lstm(batch)
+    def forward(self, obs_traj_pos, seq_start_end):      # 使用forward时的输入 model_input = torch.cat((obs_traj_rel, pred_traj_gt_rel), dim=0)   cat起来了，所以是整条长度=seq的轨迹。
+        # 一个batch： 从get_item 再经过seq_collate出来的数据类型（seq_len（frame）, batch（ped）, input_size) 这次是沿着 seq拼的。 batch = ped_scene1+ped_scene2+...
+        batch = obs_traj_pos.shape[1] #todo define the batch  # obs_traj_pos shape(20,64,2) 第二次（20,72,2）,3rd (20,107,2)     数字这么大也应证了是多个scene
+        traj_lstm_h_t, traj_lstm_c_t = self.init_encoder_traj_lstm(batch)   # (batch,32)  #  每次forward都要初始化的一个原因： 每个batch 的这个维度的size不同。 hidden state的size需要是（Batch，hidden-feature size）
         # pred_lstm_h_t, pred_lstm_c_t = self.init_decoder_traj_lstm(batch)
         pred_traj_pos = []
         traj_lstm_hidden_states = []
@@ -90,17 +92,18 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
         for i, input_t in enumerate(
             obs_traj_pos[: self.obs_len].chunk(   ## ：Doc shows chunk() input should be chunks rather than size of one chunk. chunks=size0 of input, so we have same number(dim0 of input) of chunks 
                 obs_traj_pos[: self.obs_len].size(0), dim=0  # 就是把单个时间步的tensor[1,...]给提了出来（input_t)用来循环。 其实取切片也可以做到
-            )
+            )      # (1，batch, input_size)
         ):
+            #print(input_t.shape)   # input shape ([1, 64, 2]) 后面的batch出现过 epoch([1, 72, 2]) torch.Size([1, 107, 2]) torch.Size([1, 143, 2]) 等等  （time，batch （ped），position ）
             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
-                input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)  # dim 0 of input_t is 1, use squeeze to remove this dim
+                input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)  # dim 0 of input_t is 1, use squeeze to remove this dim  # 初始化的值都是二维的 squeeze掉的只能是时间，按照LSTM 的输入要求来看。留下的是【batch，input_size】 
             )
             traj_lstm_hidden_states += [traj_lstm_h_t]  # same like .append()
 
-
-        output = obs_traj_pos[self.obs_len-1]   ## index start from 0. so last observed data's index is obs_len-1 输入的轨迹中的最后一个值。（也就是decoder第一步输入的值）
-        pred_lstm_h_t_before_noise = traj_lstm_hidden_states[-1]
-        # pred_lstm_h_t = self.add_noise(pred_lstm_h_t_before_noise)
+        
+        output = obs_traj_pos[self.obs_len-1]   ## index start from 0. so last observed data's index is obs_len-1 输入的轨迹中的最后一个值。（也就是decoder第一步输入的值）可观察的最后一个位置 （batch，pos）
+        pred_lstm_h_t_before_noise = traj_lstm_hidden_states[-1]  # last hidden state form encoder
+        # pred_lstm_h_t = self.add_noise(pred_lstm_h_t_before_noise) 
         pred_lstm_h_t = pred_lstm_h_t_before_noise
         pred_lstm_c_t = torch.zeros_like(pred_lstm_h_t).cuda()  # clear c , long term memory
 
@@ -108,9 +111,9 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
             pred_lstm_h_t, pred_lstm_c_t = self.pred_lstm_model(   ##  pred_lstm_h_t 是encoder的最后一个hidden结果。
                 output, (pred_lstm_h_t, pred_lstm_c_t)        # 循环中的output（也就是LSTM中的X）是pos，在循环中依赖linear从hidden state中得到的pos
             )
-            output = self.pred_hidden2pos(pred_lstm_h_t)      # output have same size like input, so two LSTMcell model use same input_size 
-            pred_traj_pos += [output]
-        outputs = torch.stack(pred_traj_pos)
+            output = self.pred_hidden2pos(pred_lstm_h_t)      #(batch,2) output have same size like input, so two LSTMcell model use same input_size 
+            pred_traj_pos += [output]           
+        outputs = torch.stack(pred_traj_pos)   # 沿着一个新维度对输入张量序列  (pred_len, batch,2)
 
         return outputs
 
@@ -133,12 +136,16 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
 
         #--(1)-- REPLAYED DATA---#
 
-        if x_rel_ is not None:
-            y_ = [y_rel_]
-            n_replays = len(y_) if (y_ is not None) else None     # 我理解成 list里面有很多个tensor（每个tensor是一个batch的数据），n代表有多数个tensor
+        if x_rel_ is not None:  # train a batch 指的是对 当前训练数据是一个batch，但replay的数据是多少个batch，得看执行replay过程中的sample函数得到的结果/eg：多个previous task的一个batch，就是多个batch了
+            ##YZ # 加了两行判断/ 来自BI vae 对应部分。
+            TaskIL = type(y_rel_)==list
+            if not TaskIL:
+                y_ = [y_rel_] # [tensor([[[]]])] 本来函数就是train a batch。 然而， 在vae_models.py train a batch 中，明显有区别. 那边debug 得到n-replay =12.
+            
+            n_replays = len(y_) if (y_ is not None) else None     # 我先理解成 list里面有很多个tensor（每个tensor是一个batch的数据），n代表有多数个tensor
 
             # Prepare lists to store losses for each replay
-            loss_replay = [None]*n_replays    # 将 None 重复 n_replays 次来创建列表
+            loss_replay = [None]*n_replays    # 将 None 重复 n_replays 次来创建列表, n_replays=1。 由于输入总是一个tensor（一个batch），所以总是1
             pred_traj_r = [None]*n_replays
             distill_r = [None]*n_replays
 

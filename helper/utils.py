@@ -31,8 +31,8 @@ def relative_to_abs(rel_traj, start_pos):
     """
     # batch, seq_len, 2
     rel_traj = rel_traj.permute(1, 0, 2)
-    displacement = torch.cumsum(rel_traj, dim=1)
-    start_pos = torch.unsqueeze(start_pos, dim=1)
+    displacement = torch.cumsum(rel_traj, dim=1)  
+    start_pos = torch.unsqueeze(start_pos, dim=1)  # 起点变成（batch，seq，2）
     abs_traj = displacement + start_pos
     return abs_traj.permute(1, 0, 2)
 
@@ -98,7 +98,7 @@ def l2_loss(pred_traj, pred_traj_gt, random=0, mode="average"):
     if mode == "sum":
         return torch.sum(loss)
     elif mode == "average":
-        return torch.sum(loss) / (seq_len*batch*size)
+        return torch.sum(loss) / (seq_len*batch*size) 
     elif mode == "raw":
         return loss.sum(dim=2).sum(dim=1)
 
@@ -155,7 +155,7 @@ def final_displacement_error(pred_pos, pred_pos_gt, condiser_ped=None, mode="sum
 ##################
 ##Batch learning##
 ##################
-class AverageMeter(object):
+class AverageMeter(object):    # 各种average值啊，ADE 也包括了， L2 loss 的average也包括了。
     """Computes and stores the average and current value"""
 
     def __init__(self, name, fmt=":f"):
@@ -169,7 +169,7 @@ class AverageMeter(object):
         self.sum = 0
         self.count = 0
 
-    def update(self, val, n=1):
+    def update(self, val, n=1):  # 除以的是batch
         self.val = val
         self.sum += val * n
         self.count += n
@@ -337,8 +337,8 @@ def validate(args, model, val_loader, epoch, writer=None):
     progress = ProgressMeter(len(val_loader), [ade, fde], prefix="Test: ")
     total_traj = 0
     ade_outer, fde_outer = [], []
-    mode = model.training
-    model.eval()
+    mode = model.training  # 记下 True 后面来恢复， 因为进来前还是 .train() 模式， 如果进来就是False， 出去也不能变成true。 主打一个进出不变
+    model.eval()           # 转化eval模式   
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
             batch = [tensor.cuda() for tensor in batch]
@@ -354,11 +354,11 @@ def validate(args, model, val_loader, epoch, writer=None):
             ade, fde = [], []
             total_traj += pred_traj_gt.size(1)
             pred_len = pred_traj_gt.size(0)
-            loss_mask = loss_mask[:, args.obs_len :]
+            loss_mask = loss_mask[:, args.obs_len :] 
             pred_traj_fake_rel = model(obs_traj_rel, seq_start_end)
 
             pred_traj_fake_rel_predpart = pred_traj_fake_rel[-args.pred_len :]
-            pred_traj_fake = relative_to_abs(pred_traj_fake_rel_predpart, obs_traj[-1])
+            pred_traj_fake = relative_to_abs(pred_traj_fake_rel_predpart, obs_traj[-1])  # 预测不同时间落在的不同绝对坐标
             ade_, fde_ = cal_ade_fde(pred_traj_gt, pred_traj_fake)
             ade_sum = sum(ade_)
             fde_sum = sum(fde_)

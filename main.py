@@ -24,15 +24,20 @@ parser.add_argument('--get-stamp', action='store_true', help="print param-stamp 
 parser.add_argument('--seed', type=int, default=72, help="random seed (for each random-module used)")
 parser.add_argument('--no-gups', action='store_false', dest='cuda', help="do not use GPUs")
 parser.add_argument('--data-dir', type=str, default='./datasets', dest='d_dir', help="default")
-parser.add_argument('--plot-dir', type=str, default='./plots', dest='p_dir', help="default")
+parser.add_argument('--plot-dir', type=str, default='./plots', dest='p_dir', help="default")      
 parser.add_argument('--results-dir', type=str, default='./results', dest='r_dir', help="default")
 dataset_choices = ['pedestrian', 'vehicle', 'interaction']
-parser.add_argument('--dataset_order', type=str, default='pedestrian', choices=dataset_choices)
+parser.add_argument('--dataset_order', type=str, default='pedestrian', choices=dataset_choices)    # 调整数据集的顺序，但只有一个值，如何调整的？数据集名不同，order不同。
 method_choices = ['batch_learning', 'continual_learning']
-parser.add_argument('--method', type=str, default='batch_learning', choices=method_choices)
+parser.add_argument('--method', type=str, default='continual_learning', choices=method_choices)         
+# add a  "load or train" mode selection
+parser.add_argument("--loadpth",action='store_true',help="load data from pth for model and generator")
+# task number. how many task we need to process.
+num_choices=[1,2,3,4]
+parser.add_argument('--num-task',type=int,default=4,choices=num_choices,dest="num_task",help="number of tasks need to process")
 
 # training hyperparameters / initialization
-train_params = parser.add_argument_group('Training Parameters')
+train_params = parser.add_argument_group('Training Parameters')                                    # 分组只是为了help时方便查看，不影响args.name的调用
 train_params.add_argument('--iters', type=int, default=400, help="batches to optimize solver")
 train_params.add_argument('--lr', type=float, default=0.001, help="learning rate")
 train_params.add_argument('--batch_size', type=int, default=64, help="batch-size")
@@ -56,7 +61,7 @@ model_params.add_argument('--traj_lstm_hidden_size', default=32, type=int)
 model_params.add_argument('--traj_lstm_output_size', default=32, type=int)
 # gat
 model_params.add_argument("--heads", type=str, default="4,1", help="Heads in each layer, splitted with comma")
-model_params.add_argument("--hidden-units", type=str, default="16", help="Hidden units in each hidden layer, splitted with comma")
+model_params.add_argument("--hidden_units", type=str, default="16", help="Hidden units in each hidden layer, splitted with comma")  # 之前写的hidden-units 改成了_ 因为后面调用名字对不上应该根本没有调用
 model_params.add_argument("--graph_network_out_dims", type=int, default=32, help="dims of every node after through GAT module")
 model_params.add_argument("--graph_lstm_hidden_size", default=32, type=int)
 model_params.add_argument("--dropout", type=float, default=0, help="Dropout rate (1 - keep probability)")
@@ -73,8 +78,8 @@ gen_params.add_argument('--replay_batch_size', type=int, default=64, help="repla
 # "memory replay" parameters
 replay_params = parser.add_argument_group('Generative Replay Parameters')
 replay_params.add_argument('--z_dim', type=int, default=200, help="size of latent representation")
-replay_choices = ['offline', 'exact', 'generative', 'none', 'current', 'exemplars']
-replay_params.add_argument('--replay', type=str, default='none', choices=replay_choices)
+replay_choices = ['offline', 'exact', 'generative', 'none', 'current', 'exemplars']  # ER is exact or none. check
+replay_params.add_argument('--replay', type=str, default='generative', choices=replay_choices)
 replay_params.add_argument('--x_dim', default=2, type=int)
 replay_params.add_argument('--h_dim', default=64, type=int)
 replay_params.add_argument('--n_layers', default=1, type=int)
@@ -94,7 +99,7 @@ cl_params.add_argument('--epsilon', type=float, default=0.1, dest="epsilon", hel
 eval_params = parser.add_argument_group('Evaluation Parameters')
 eval_params.add_argument('--time', action='store_true', help="keep track of total training time")
 eval_params.add_argument('--metrics', action='store_true', help="calculate additional metrics (e.g., BWT, forgetting)")
-eval_params.add_argument('--pdf', action='store_true', help="generator pdf with results")
+eval_params.add_argument('--pdf', action='store_false', help="generator pdf with results")
 eval_params.add_argument('--visdom', action='store_true', help="use visdom for on-the-fly plots")
 eval_params.add_argument('--val', action='store_true', help="use validation data")
 class_choices = ['current', 'all', 'replay']
@@ -119,7 +124,7 @@ batch_params.add_argument("--checkpoint_log", default=50, type=int, help="iters 
 
 
 
-def run(args, verbose=False):
+def run(args, verbose=False):                                   #verbose 输入是true， 记得是输出详情
 
     # Use cuda?
     cuda = torch.cuda.is_available() and args.cuda
@@ -136,25 +141,25 @@ def run(args, verbose=False):
     if cuda:
         torch.cuda.manual_seed(args.seed)
 
-    n_units = (
-        [args.traj_lstm_hidden_size]
-        + [int(x) for x in args.hidden_units.strip().split(",")]
-        + [args.graph_lstm_hidden_size]
-    )
+    n_units = (                                                   # 这个参数只在main model 是“gat”的情况下用
+        [args.traj_lstm_hidden_size]                              #int
+        + [int(x) for x in args.hidden_units.strip().split(",")]  # 如果输入"16,32,64"，则return [16, 32, 64] int list
+        + [args.graph_lstm_hidden_size]                            # 但后面这俩层是 对GAT stagt 方法的，不是基本的main model
+    )                                                               # list之间 + 是按顺序拼接
     n_heads = [int(x) for x in args.heads.strip().split(",")]
 
     ###############################################################################
     ##################
     ##Batch learning##
     ##################
-    if args.method == "batch_learning":
+    if args.method == "batch_learning":                          
         if not os.path.exists(args.log_dir):
             os.makedirs(args.log_dir)
         utils.set_logger(os.path.join(os.path.abspath(args.log_dir), "train.log"))
-        checkpoint_dir = args.log_dir + "/checkpoint"
+        checkpoint_dir = args.log_dir + "/checkpoint"         # + 符号用于将多个字符串连接在一起，形成一个新的字符串
         if os.path.exists(checkpoint_dir) is False:
             os.mkdir(checkpoint_dir)
-        train_path = utils.get_dset_path(args.dataset_name, "train")
+        train_path = utils.get_dset_path(args.dataset_name, "train")   # 只是得到path，不是创建文件
         val_path = utils.get_dset_path(args.dataset_name, "val")
 
         # loader data
@@ -163,12 +168,12 @@ def run(args, verbose=False):
             from data.loader import data_loader,data_dset
         else:
             from data.loader_rotation import data_loader
-        train_dset = data_dset(args, train_path)
+        train_dset = data_dset(args, train_path)  
         train_loader = data_loader(args, train_dset, args.batch_size)
         val_dset = data_dset(args, val_path)
         val_loader = data_loader(args, val_dset, args.batch_size)
         writer = SummaryWriter()
-        if args.main_model == "lstm":
+        if args.main_model == "lstm":                              # choose main model
             from main_model.encoder import Predictor
             model = Predictor(
                 obs_len=args.obs_len,
@@ -204,7 +209,7 @@ def run(args, verbose=False):
 
         for epoch in range(args.start_epoch, args.iters + 1):
             train(args, model, train_loader, optimizer, epoch, writer)
-            if epoch >= args.val_epoch:
+            if epoch >= args.val_epoch:                 # 训练epoch 次数 多于 validation 需要的epoch次数时
                 ade = utils.validate(args, model, val_loader, epoch, writer=writer)
                 is_best = ade < best_ade
                 best_ade = min(ade, best_ade)
@@ -230,7 +235,7 @@ def run(args, verbose=False):
     ##Continual learning##
     ######################
 
-    if args.method == "continual_learning":
+    if args.method == "continual_learning":    
         # Set default arguments & check for incompatible options
         args.lr_gen = args.lr if args.lr_gen is None else args.lr_gen
         args.g_iters = args.iters if args.g_iters is None else args.g_iters
@@ -254,10 +259,11 @@ def run(args, verbose=False):
         if verbose:
             print("\nPreparing the data...")
         #
-        if args.dataset_order == 'pedestrian':
+        if args.dataset_order == 'pedestrian':    # 为了简化计算
             train_order = ['ETH', 'UCY', 'inD', 'INTERACTION']
             val_order = ['ETH', 'UCY', 'inD', 'INTERACTION']
             test_order = ['ETH', 'UCY', 'inD', 'INTERACTION']
+            
         if args.dataset_order == 'vehicle':
             train_order = ['highD', 'inD', 'rounD']
             val_order = ['highD', 'inD', 'rounD']
@@ -266,6 +272,12 @@ def run(args, verbose=False):
             train_order = ['MT', 'SR', 'LN', 'OF']
             val_order = ['MT', 'SR', 'LN', 'OF']
             test_order = ['MT', 'SR', 'LN', 'OF']
+
+        ## define how many tasks needed to be process.
+        num_index=args.num_task
+        train_order = train_order[:num_index]
+        val_order = val_order[:num_index]
+        test_order = test_order[:num_index]
 
 
         tasks = len(train_order)
@@ -286,8 +298,8 @@ def run(args, verbose=False):
             # load train dataset
             train_dset = data_dset(args, train_path)
             # train_loader = data_loader(args, train_dset, args.batch_size)
-            print("dataset: {} | train trajectories: {}".format(dataset_name, (train_dset.obs_traj.shape[0])))
-            train_datasets.append(train_dset)
+            print("dataset: {} | train trajectories: {}".format(dataset_name, (train_dset.obs_traj.shape[0]))) # shape 0  是 __init__ 里面的obs_traj 即重组数据集到目标tensor后，没有分batch前的所有obs_traj (ped 堆叠all,pos,seq)
+            train_datasets.append(train_dset)        # 多个 dataset class 的实例，obj，放入一个list
 
         print("\nInitializing val dataset")
         for i, dataset_name in enumerate(val_order):
@@ -298,7 +310,7 @@ def run(args, verbose=False):
             val_loader = data_loader(args, val_dset, args.batch_size)
             print("dataset: {} | val trajectories: {}".format(dataset_name, (val_dset.obs_traj.shape[0])))
             val_datasets.append(val_dset)
-            val_dataset.append(val_loader)
+            val_dataset.append(val_loader)          # 这个就算多个iterable
 
         print("\nInitializing test dataset")
         for i, dataset_name in enumerate(test_order):
@@ -363,13 +375,13 @@ def run(args, verbose=False):
             fake_generator = None
             # -specify architecture
             # lstm
-            if args.replay_model == 'lstm':
+            if args.replay_model == 'lstm': # generate observed part.
                 from generative_model.vae_models import AutoEncoder
                 generator = AutoEncoder(obs_len=args.obs_len, pred_len=args.pred_len, traj_lstm_input_size=args.traj_lstm_input_size,
                                         traj_lstm_hidden_size=args.traj_lstm_hidden_size, traj_lstm_output_size=args.traj_lstm_output_size,
                                         z_dim=args.z_dim).to(device)
             # condition
-            if args.replay_model == 'condition':
+            if args.replay_model == 'condition':  # generate only future part.
                 from generative_model.vae_models import AutoEncoder
                 generator = AutoEncoder(obs_len=args.obs_len, pred_len=args.pred_len, traj_lstm_input_size=args.traj_lstm_input_size,
                                         traj_lstm_hidden_size=args.traj_lstm_hidden_size, traj_lstm_output_size=args.traj_lstm_output_size,
@@ -443,7 +455,7 @@ def run(args, verbose=False):
         #----CALLBACKS----#
         #-----------------#  #
 
-        # Callbacks for reporting and visualizing accuracy
+        # Callbacks for reporting and visualizing accuracy    # 这些都是返回的函数，把函数送进train_cl里面 发挥作用。
         generator_loss_cbs = [
             cb._VAE_loss_cb(log=args.loss_log, visdom=visdom, model=generator, tasks=tasks,
                             iters_per_task=args.g_iters,
@@ -484,21 +496,43 @@ def run(args, verbose=False):
         #----TRAINING----#
         #----------------#
 
-        if verbose:
-            print("\nTraining...")
-        # Keep track of training-time
-        start = time.time()
-        # Train model
-        train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model=args.replay, iters=args.iters, batch_size=args.batch_size,
-                 generator=generator, fake_generator=fake_generator, gen_iters=args.g_iters, gen_loss_cbs=generator_loss_cbs, fake_gen_loss_cbs=fake_generator_loss_cbs,
-                 sample_cbs=sample_cbs, eval_cbs=eval_cbs, loss_cbs=solver_loss_cbs, val_loss_cbs=solver_val_loss_cbs,
-                 metric_cbs=metric_cbs)
-        # Get total training-time in seconds, and write to file
-        if args.time:
-            training_time = time.time() - start
-            time_file = open("{}/time-{}.txt".format(args.r_dir, param_stamp), 'w')
-            time_file.write('{}\n'.format(training_time))
-            time_file.close()
+        # 加一个 train or load的选项
+        if args.loadpth:
+            model_path = f'model_params/model_after_task{args.num_task}.pth'  # 模型的文件路径
+            generator_path = f'model_params/generator_after_task{args.num_task}.pth'  # 生成器的文件路径
+            # 加载模型
+            model = torch.load(model_path)
+            model.eval()  # 如果你只想进行推理而不是训练，可以调用eval()方法
+            # 加载生成器
+            generator = torch.load(generator_path)
+            generator.eval()  # 同样，如果你只想进行推理，可以调用eval()方法
+
+        else: # train
+            if verbose:
+                print("\nTraining...")
+            # Keep track of training-time
+            start = time.time()
+            # Train model
+            train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model=args.replay, iters=args.iters, batch_size=args.batch_size,
+                    generator=generator, fake_generator=fake_generator, gen_iters=args.g_iters, gen_loss_cbs=generator_loss_cbs, fake_gen_loss_cbs=fake_generator_loss_cbs,
+                    sample_cbs=sample_cbs, eval_cbs=eval_cbs, loss_cbs=solver_loss_cbs, val_loss_cbs=solver_val_loss_cbs,
+                    metric_cbs=metric_cbs)
+            
+            # # save model and generator/ don't need this, in train, it saved best model already.in checkpoint, and best in current dir
+            # save_dir = "model_params"
+            # if not os.path.exists(save_dir):
+            #     os.makedirs(save_dir)
+            # model_path = os.path.join(save_dir, f"model_after_task{args.num_task}.pth")
+            # torch.save(model.state_dict(), model_path)
+            # generator_path = os.path.join(save_dir, f"generator_after_task{args.num_task}.pth")
+            # torch.save(generator.state_dict(), generator_path)
+
+            # Get total training-time in seconds, and write to file
+            if args.time:
+                training_time = time.time() - start
+                time_file = open("{}/time-{}.txt".format(args.r_dir, param_stamp), 'w')
+                time_file.write('{}\n'.format(training_time))
+                time_file.close()
 
         #------------------------------------------------------------------------------------------------------------------#
         #------------------#

@@ -17,7 +17,7 @@ def memory_buff(args):
     # eth
     train_path_eth = utils.get_dset_path("ETH", 'train')
     train_dset_eth = data_dset(args, train_path_eth)
-    num_memory_eth = int(0.1 * len(train_dset_eth))
+    num_memory_eth = int(0.1 * len(train_dset_eth))   # 10% 的数据
     dataset_eth = data_loader(args, train_dset_eth, num_memory_eth)
     batch_eth = []
     for batch_index, batch in enumerate(dataset_eth):

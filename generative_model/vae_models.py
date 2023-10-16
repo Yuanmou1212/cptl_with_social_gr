@@ -59,32 +59,32 @@ class PoolHiddenNet(nn.Module):   # should be social encoder part.(FC+pooling)
     def forward(self, h_states, seq_start_end, end_pos):       ## ?  h_states might not comes from Class Predictor, which forward() doesn't provide h_states, only provides position output
         """
         Inputs:
-        - h_states: Tensor of shape (num_layers, batch, h_dim)    一个batch一个batch的输入   ??cause we use nn.LSTMCell I guess num_layers = 1
-        - seq_start_end: A list of tuples which delimit sequences within batch    #在批处理中分隔序列的元组列表# 这个batch输入的所有trajectories的第一条起点index和最后一条终点index。。 切片操作是基于 seq_start_end 中的 start 和 end 索引进行的,它指定了当前轨迹序列在展平后的2D张量中的起始和结束位置。
+        - h_states: Tensor of shape (num_layers, batch, h_dim)    encoder的final state 一个batch一个batch的输入   ??cause we use nn.LSTMCell I guess num_layers = 1 . right
+        - seq_start_end: A list of tuples which delimit sequences within batch    #在批处理中分隔序列的元组列表# 这个batch/pedestrains 输入的处于同一个场景的的peds index (start_id,end_id) 构成一个tuple。这些tuple把总共的batch区分成几个scene 。 切片操作是基于 seq_start_end 中的 start 和 end 索引进行的,它指定了当前轨迹序列在展平后的2D张量中的起始和结束位置。
         - end_pos: Tensor of shape (batch, 2)
         Output:
         - pool_h: Tensor of shape (batch, bottleneck_dim)
         """
         pool_h = []
-        for _, (start, end) in enumerate(seq_start_end):   # [(start, end),(start, end),..]   是3D 转 2D 后的 tensor的对应start， end index。
+        for _, (start, end) in enumerate(seq_start_end):   # [(start, end),(start, end),..]   是3D （seq, ped_id(batch), pos(x,y)） 转 2D 后的 tensor的对应start， end index。
             start = start.item()
             end = end.item()
-            num_ped = end - start    # ped pedestrain 可以得到当前轨迹序列中的行人数量， 所以一个循环处理的是这个batch中的所有trajectory
+            num_ped = end - start    # ped pedestrain               可以得到当前轨迹序列中的行人数量， 所以一个循环处理的是这个batch中的所有trajectory/ 因为用的cumsum 方法， 按每组的人数累加的，（start，end），包含start 不包含 end。
             if num_ped > 1:
-                curr_hidden = h_states.view(-1, self.h_dim)[start:end]  # (num_layers * batch, h_dim)  不同的start 和end 引起不同的loop， 从而代表不同的trajectory
-                curr_end_pos = end_pos[start:end]                       ## ？？ How to make sure index "start" "end" corresponding the same part of h_states and end_pos
-                # Repeat -> H1, H2, H1, H2   增加行， 有多少行人，复制多少次
+                curr_hidden = h_states.view(-1, self.h_dim)[start:end]  # (num_layers(LSTM的layer，我们取1) * batch, h_dim)  不同的start 和end 引起不同的loop， 从而代表不同的trajectory
+                curr_end_pos = end_pos[start:end]                       
+                # Repeat -> H1, H2, H1, H2                          增加行， 有多少行人，复制多少次。 整体一起copy
                 curr_hidden_1 = curr_hidden.repeat(num_ped, 1) 
                 # Repeat position -> P1, P2, P1, P2
                 curr_end_pos_1 = curr_end_pos.repeat(num_ped, 1)
                 # Repeat position -> P1, P1, P2, P2
-                curr_end_pos_2 = self.repeat(curr_end_pos, num_ped)    # num_ped is changing during for loop, why??  因为每个batch的行人数量不一定一样
+                curr_end_pos_2 = self.repeat(curr_end_pos, num_ped)    #                    每个batch的行人数量不一定一样
                 curr_rel_pos = curr_end_pos_1 - curr_end_pos_2         # relative position!
                 curr_rel_embedding = self.spatial_embedding(curr_rel_pos)
-                mlp_h_input = torch.cat([curr_rel_embedding, curr_hidden_1], dim=1)
-                curr_pool_h = self.mlp_pre_pool(mlp_h_input)
-                curr_pool_h = curr_pool_h.view(num_ped, num_ped, -1).max(1)[0]
-            else:
+                mlp_h_input = torch.cat([curr_rel_embedding, curr_hidden_1], dim=1)  #          这俩都是2D了， 扩展列=增加一个特征，复制后的hidden state。 为什么a对a或b或c的相对位置分别和 a或b或c的hidden state 拼起来再送入感知机MLP： 我觉得是模拟一个人观察自己和他人的距离，以及他人的运动轨迹（信息压缩在他人的hidden中），才做出自己的判断。
+                curr_pool_h = self.mlp_pre_pool(mlp_h_input)                         # 2d（复制后的行数num_ped*num_ped，新列数 是embedding 输出特征的维度数 ）
+                curr_pool_h = curr_pool_h.view(num_ped, num_ped, -1).max(1)[0]    # dim = 1  reduce dim1. 这个max就是 max pool 的由来。 [0]是只返回max的值而不返回index
+            else:                                
                 curr_hidden = h_states.view(-1, self.h_dim)[start:end]
                 curr_pool_h = curr_hidden
             pool_h.append(curr_pool_h)
@@ -197,26 +197,26 @@ class AutoEncoder(Replayer):
         # extract final hidden features (forward-pass)
         hE = self.fcE(x)
         # get parameters for reparametrization
-        (z_mean, z_logvar) = self.toZ(hE)
+        (z_mean, z_logvar) = self.toZ(hE)         # 输出维度可以定义，可以不是1维度的。
         return z_mean, z_logvar, hE
 
     # Perform "reparametrization trick" to make these stochastic variables differentiable
-    def reparameterize(self, mu, logvar):
+    def reparameterize(self, mu, logvar):    # 改成 多维度时，这里应该要改
         std = logvar.mul(0.5).exp_()
-        eps = std.new(std.size()).normal_()
+        eps = std.new(std.size()).normal_()      # .normal_() GPT 说是单维度的。
         return eps.mul(std).add_(mu)
 
     def decode(self, z, seq_start_end, obs_traj_pos=None):
-        hD = self.fromZ(z)
-        hidden_features = self.fcD(hD)
+        hD = self.fromZ(z)   # 从z中展开，是个MLP
+        hidden_features = self.fcD(hD)  # embedding 得到相同的特征维度。
         pred_lstm_h_t = hidden_features
         pred_lstm_c_t = torch.zeros_like(pred_lstm_h_t).cuda()
         pred_traj_pos = []
 
-        output = obs_traj_pos[0]
-        pred_lstm_h_t = self.pool_net(hidden_features, seq_start_end, output)
-        pred_traj_pos += [output]
-        for i in range(self.obs_len-1):
+        output = obs_traj_pos[0]    # 输入的是-1. end position， decode时候就是 start position了
+        pred_lstm_h_t = self.pool_net(hidden_features, seq_start_end, output)  # output 是obs的路径的 end position # 再pool一次。在那片论文里可以再decode每一次过lstm都pool一次，毕竟附近的人的距离会变化。
+        pred_traj_pos += [output]    # output是(batch, 2)，也是一个时间步的结果。
+        for i in range(self.obs_len-1):        #  # ？？lack a cancatenate with hidden state again as input to LSTM like that paper？ 有个问题， 那篇论文再decode部分 采用的是 pool后的结果和上一步的hidden state 拼接起来进LSTM的。！
             pred_lstm_h_t, pred_lstm_c_t = self.pred_lstm_model(
                 output, (pred_lstm_h_t, pred_lstm_c_t)  # todo whether use teach force, input_t --> output
             )
@@ -232,7 +232,7 @@ class AutoEncoder(Replayer):
     #     hD = self.fromZ(z)
 
 
-    def forward(self, obs_traj_pos, seq_start_end):
+    def forward(self, obs_traj_pos, seq_start_end):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
         batch = obs_traj_pos.shape[1] #todo define the batch
         traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
         # traj_lstm_h_t_2, traj_lstm_c_t_2 =self.init_obs_traj_lstm(batch)
@@ -245,11 +245,11 @@ class AutoEncoder(Replayer):
         for i, input_t in enumerate(
             obs_traj_pos[: self.obs_len].chunk(
                 obs_traj_pos[: self.obs_len].size(0), dim=0
-            )
+            )  # （1，batch，input_size） 每个时间步逐步输入LSTM
         ):
             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model_encoder(
                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
-            )
+            )  # （batch，input_size）
             traj_lstm_hidden_states += [traj_lstm_h_t]
 
         # Encoder2, calculate the future traj hidden states, similar with embedding
@@ -270,39 +270,39 @@ class AutoEncoder(Replayer):
         # encode (forward), reparameterize and decode (backward)
         final_encoder_h  = traj_lstm_hidden_states[-1]
         # social pooling (Reference:https://github.com/agrimgupta92/sgan)
-        end_pos = obs_traj_pos[-1, :, :]
-        pool_h = self.pool_net(final_encoder_h, seq_start_end, end_pos)
+        end_pos = obs_traj_pos[-1, :, :]       # 最后一个可观测时间步的所有batch的位置信息。 接下来就要拆开batch得到多个scene进入 pool 了，之前LSTM 只考虑了每个行人的轨迹。batch/ped id不同的都不会互相影响 
+        pool_h = self.pool_net(final_encoder_h, seq_start_end, end_pos)    # 压缩的信息意义是： 行人a考虑其他人对a的距离 以及 其他人对应的hidden state（历史轨迹行为） 后，经过MLP (考虑)，最被激活的代表 最需要考虑的特征。（可能反应的是b在身边很近但同方向，c从对面来很快且靠近...）
         # Construct input hidden states for decoder
-        vae_input = torch.cat([final_encoder_h, pool_h], dim=1)
+        vae_input = torch.cat([final_encoder_h, pool_h], dim=1)            # 由于pool 考虑的是和他人的信息，忘记了自己的路径（类似忘记了自己的目的地和所在地），所以要cat
         # vae_input = final_encoder_h
-        mu, logvar, hE = self.encode(vae_input)
-        z = self.reparameterize(mu, logvar)
+        mu, logvar, hE = self.encode(vae_input)      
+        z = self.reparameterize(mu, logvar)   # 自带sample
         traj_recon = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos)
-        return (traj_recon, mu, logvar, z)
+        return (traj_recon, mu, logvar, z) 
 
 
 
     ##------- SAMPLE FUNCTIONS -------##
 
-    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end):
+    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end): # 所谓的replay_seq_start_end 就是用新的task的dataset取的数据格式，来创建replay数据！ 即additional info中的number
         '''Generate [size] samples from the model. Output is tensor (not "requiring grad"), on same device as <self>'''
 
         # set model to eval()-mode
-        mode = self.training
+        mode = self.training   
         self.eval()
         obs_traj_rel = obs_traj_rel
         replay_seq_start_end = replay_seq_start_end
         size = obs_traj_rel.shape[1]
 
-        # sample z
-        z = torch.randn(size, self.z_dim).to(self._device())
+        # sample z 
+        z = torch.randn(size, self.z_dim).to(self._device())  # 修改成多维高斯，这里采样可能也要变？
 
         # decode z into traj x
         with torch.no_grad():
             traj_rel = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel)
 
         # relative to absolute
-        traj = relative_to_abs(traj_rel, obs_traj[0])
+        traj = relative_to_abs(traj_rel, obs_traj[0]) # obs_traj 即 additional info中的 intial position
 
         # set model back to its initial mode
         self.train(mode=mode)
@@ -333,23 +333,23 @@ class AutoEncoder(Replayer):
         if mode == "sum":
             return torch.sum(reconL)
         elif mode == "average":
-            return torch.sum(reconL) / (batch*seq_len*size)
+            return torch.sum(reconL) / (batch*seq_len*size)   # 这是对所有元素求平均，没有忽略batch
         elif mode == "raw":
             return reconL.sum(dim=2).sum(dim=1)
 
 
     def calculate_variat_loss(self, mu, logvar):
-        '''Calculate reconstruction loss for each element in the batch.
+        '''Calculate reconstruction loss for each element in the batch. 
 
         INPUT:  - [mu]      <2D-tensor> by encoder predicted mean for [z]
-                - [logvar]  <2D-tensor> by encoder predicted logvar for [z]
+                - [logvar]  <2D-tensor> by encoder predicted logvar for [z]   # 2d (batch,dimension)
 
         OUTPUT: - [variatL] <1D-tensor> of length [batch_size]
         '''
 
         # --> calculate analytically
         # ---- see Appendix B from: Kingma & Welling (2014) Auto-Encoding Variational Bayes, ICLR ----#
-        variatL = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        variatL = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)    #可以用于多维高斯，因为每个mu，logvar元素独立。这里也是对dim1 求和，样本维度上求和。
 
         return variatL
 
@@ -374,7 +374,7 @@ class AutoEncoder(Replayer):
 
         ###---Reconstruction loss---###
         reconL = self.calculate_recon_loss(x=x, x_recon=recon_x, mode=self.average)  # -> possibly average over traj
-        reconL = torch.mean(reconL)                                                     # -> average over batch
+        reconL = torch.mean(reconL)                                                     # -> average over batch   # 其实没必要，上一步对所有元素平均了
 
         ###--- Variational loss ----###
         if logvar is not None:
@@ -424,7 +424,7 @@ class AutoEncoder(Replayer):
             # if active_classes is not None:
             #     pass              #
 
-            # Calculate all losses
+            # Calculate all losses    # 因为是VAE，是重建，所以没有yhat  ##YZ internal replay 情况下，x是 hidden_in （进入SGR的hidden，），x_recon 是hidden_out(调用full的forward，可以得到).
             reconL, variatL = self.loss_function(recon_x=recon_batch, x=x_rel, y_hat=None, y_target=None, mu=mu, logvar=logvar)
 
             # Weigh losses as requested
@@ -436,7 +436,12 @@ class AutoEncoder(Replayer):
 
         ##--(2)-- REPLAYED DATA --##
         if x_ is not None:
-
+            #YZ# the BI code 说TASKIL 任务 y_ 是list， x_ 也是list。既然下文判断了x_是不是list，那前面也应该同样的方法对y_ 判断。
+            TaskIL = (type(y_)==list) 
+            if not TaskIL:
+                y_ = [y_]
+            ## 这样和encoder里面的写法一致了。 这样这里因该也是1了  。 debug验证也是1.
+            #     
             n_replays = len(y_) if (y_ is not None) else 1
             # n_replays = 1
 

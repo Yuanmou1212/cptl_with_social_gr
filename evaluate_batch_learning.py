@@ -6,7 +6,7 @@ import pickle
 
 import torch
 
-from data.loader import data_loader
+from data.loader import data_loader, data_dset
 from main_model.encoder import Predictor
 from helper.evaluate import evaluate
 from helper import utils
@@ -92,13 +92,14 @@ def get_generator(checkpoint):
 
 
 
-def main(args):
+def main(args):    # 说着get generator，实际上return的是model...麻了
     checkpoint_path = os.path.join(os.path.abspath(args.log_dir), "{}_{}_{}_best.pth.tar".format(args.main_model, args.dataset_name_train, args.aug))
     checkpoint = torch.load(checkpoint_path)
-    generator = get_generator(checkpoint)
+    generator = get_generator(checkpoint)   # 这里的generator都是代表model的
     path = get_dset_path(args.dataset_name_test, args.dset_type)
-
-    _, loader = data_loader(args, path)
+    
+    data_set = data_dset(args,path)
+    loader = data_loader(args, data_set,args.batch_size) #  补上缺失的 args.batch_size
     ade, fde = evaluate(loader, generator)
     d = {'training dataset': args.dataset_name_train, 'testing dataset': args.dataset_name_test, 'Pred len': args.pred_len,
          'ADE': ade, 'FDE': fde}
