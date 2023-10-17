@@ -127,7 +127,7 @@ def evaluate(loader, predictor):
             ade_sum = evaluate_helper(ade, seq_start_end)  # 搞半天就是把所有 每条traj（batch) 的error加起来。 转置，stack对于一个元素的list都没用。
             fde_sum = evaluate_helper(fde, seq_start_end)
 
-            ade_outer.append(ade_sum)
+            ade_outer.append(ade_sum) # 进来的每个是一个batch中的很多条traj 的error之和，就算一个batch的error
             fde_outer.append(fde_sum)
         ade = sum(ade_outer).item() / (total_traj * pred_len)
         fde = sum(fde_outer).item() / (total_traj)

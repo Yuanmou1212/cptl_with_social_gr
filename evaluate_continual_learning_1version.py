@@ -76,9 +76,10 @@ class_choices = ['current', 'all', 'replay']
 parser.add_argument('--val_class', default='current', type=str, choices=class_choices, help='whether use current or previous task validation data')
 parser.add_argument('--si', action='store_true', help="use 'Synaptic Intelligence' (Zenke, Poole et al, 2017)")
 parser.add_argument('--c', type=float, dest="si_c", help="--> SI: regularisation strength")
-
+parser.add_argument("--gpu_index", default=0, type=int)
 
 def get_model(checkpoint):
+    device = torch.device('cuda', index=args.gpu_index) if torch.cuda.is_available() else torch.device('cpu')
     if args.main_model == "lstm":
         from main_model.encoder import Predictor
         model = Predictor(
@@ -87,7 +88,7 @@ def get_model(checkpoint):
             traj_lstm_input_size=args.traj_lstm_input_size,
             traj_lstm_hidden_size=args.traj_lstm_hidden_size,
             traj_lstm_output_size=args.traj_lstm_output_size
-        )
+        ).to(device)
     if args.main_model == "gat":
         n_units = (
                 [args.traj_lstm_hidden_size]
@@ -101,7 +102,7 @@ def get_model(checkpoint):
             traj_lstm_hidden_size=args.traj_lstm_hidden_size, traj_lstm_output_size=args.traj_lstm_output_size,
             n_units=n_units, n_heads=n_heads, graph_network_out_dims=args.graph_network_out_dims,
             dropout=args.dropout, alpha=args.alpha, graph_lstm_hidden_size=args.graph_lstm_hidden_size
-        )
+        ).to(device)
 
     model.load_state_dict(checkpoint)
     model.cuda()
@@ -139,7 +140,7 @@ def main(args):
 
         test_datasets=[]
         print("\nInitializing test dataset")
-        for i, dataset_name in enumerate(test_order):
+        for i, dataset_name in enumerate(test_order):  # build dataset will includes some randomness. like shuffle here. that's why we fix the seed. change the seed for training but not for evaluate.
             # load test dataset path
             test_path = utils.get_dset_path(dataset_name, "test")
             # load test dataset
@@ -193,6 +194,12 @@ def main(args):
 if __name__ == "__main__":
     args = parser.parse_args()
     torch.manual_seed(72)
+    # cuda = torch.cuda.is_available()
+    # import numpy as np
+    # np.random.seed(args.seed)
+    # torch.manual_seed(args.seed)
+    # if cuda:
+    #     torch.cuda.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     main(args)

@@ -255,7 +255,7 @@ def validate_cl(args, model, val_loader, epoch, writer=None):
     losses_val = AverageMeter("Loss", ":.6f")
     total_traj = 0
     ade_outer, fde_outer = [], []
-    # mode = model.training
+    mode = model.training # 之前被comment了，我怀疑每个epoch model进入eval被设置为eval模式后下一个epoch训练就没法展开？
     model.eval()
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
@@ -288,7 +288,7 @@ def validate_cl(args, model, val_loader, epoch, writer=None):
         ade = sum(ade_outer).item() / (total_traj * pred_len)
         fde = sum(fde_outer).item() / (total_traj)
 
-    # model.train(mode=mode)
+    model.train(mode=mode)
     return ade, losses_val.avg
 
 

@@ -561,6 +561,48 @@ def run(args, verbose=False):                                   #verbose 输入�
         if verbose and args.time:
             print("=> Total training time = {:.1f} seconds\n".format(training_time))
 
+        # # A test, do same test but load so far best model.  实验，在这个地方加载一下保存的最好模型，看看结果是不是一样。
+        # print('试试紧跟着加载最好模型是什么结果')
+        # checkpoint_path = os.path.join(os.path.dirname(__file__), "{method}_{replay}_{task}_model_{order}_{batch_size}_{seed}_{val}_{val_class}_{si}_{si_c}.path".format(
+        #                                             method=args.method, replay=args.replay, task=tasks,
+        #                                             order=args.dataset_order, batch_size=args.batch_size,
+        #                                             seed=args.seed,
+        #                                             val=args.val, val_class=args.val_class,
+        #                                             si=args.si, si_c=args.si_c))
+
+        # checkpoint = torch.load(checkpoint_path)
+
+        # model_test = Predictor(
+        #     obs_len=args.obs_len,
+        #     pred_len=args.pred_len,
+        #     traj_lstm_input_size=args.traj_lstm_input_size,
+        #     traj_lstm_hidden_size=args.traj_lstm_hidden_size,
+        #     traj_lstm_output_size=args.traj_lstm_output_size
+        # )
+
+        # model_test.load_state_dict(checkpoint)
+        # model_test.cuda()
+        # model_test.eval()
+        # ades = []
+        # fdes = []
+        # for i in range(tasks):
+        #     ade,fde = evaluate.validate(model,test_datasets[i])
+        #     ades.append(ade)
+        #     fdes.append(fde)
+        # average_ades = sum(ades) / tasks
+        # average_fdes = sum(fdes) / tasks
+
+        # if verbose:
+        #     print("\n Precision on test-set")
+        #     for i in range(tasks):
+        #         print(" - Task {}: ADE {:.4f} FDE {:.4f}".format(i+1, ades[i], fdes[i]))
+        #     print("==> Average precision over all {} tasks: ADE {:.4f} FDE {:.4f}".format(tasks, average_ades, average_fdes))
+
+        # if verbose and args.time:
+        #     print("=> Total training time = {:.1f} seconds\n".format(training_time))
+
+
+
         #------------------------------------------------------------------------------------------------------------------#
         #-------------------#
         #------OUTPUT-------#
