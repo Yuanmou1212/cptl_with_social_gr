@@ -209,8 +209,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                                 replay_out[6].to(device))
                         x_rel_ = replay_traj.cuda()
                         seq_start_end_ = seq_start_end
-                        # previous_model.eval()
-                        #y_rel_ = previous_model(x_rel_, seq_start_end_)
+                    previous_model.eval()
+                    y_rel_ = previous_model(x_rel_, seq_start_end_)
+
                     if args.replay_model == "condition":    # 之前的SOTA 方法 condition generative replay
                         # memory_seq = [obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end]
                         # replay_traj = [traj, traj_rel, seq_start_end]
@@ -242,9 +243,6 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         x_rel_ = memory_seq[2].cuda()
                         y_rel_ = memory_seq[3].cuda()
                         seq_start_end_ = memory_seq[4].cuda()
-                        
-                    previous_model.eval()
-                    y_rel_ = previous_model(x_rel_, seq_start_end_)
 
                 # Get target scores and labels (i.e., [scores_] / [y_]) -- using previous model, with no_grad()
                 # -if there are no task-specific mask, obtain all predicted scores at once
@@ -383,6 +381,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                 val_loss_cb(progress, epoch, loss_val_dict_main, task=task)
                         ade_val = ade_current + ade_previous
                         is_best = ade_val < best_ade     # best 每个task结束 reset 一次200. 所以依然会在进行新task时得到最好的model
+                        best_ade = min(ade_val, best_ade)  # 意外删除了best 的更新
                         if is_best:
                             previous_model = copy.deepcopy(model)
                             #file_dir = os.path.dirname(__file__) + "/chekpoint"
