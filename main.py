@@ -592,7 +592,7 @@ def run(args, verbose=False):                                   #verbose 输入�
         ades = []
         fdes = []
         for i in range(tasks):
-            ade,fde = evaluate.validate(model_test,test_datasets[i])
+            ade,fde = evaluate.validate(model_test,test_datasets[i],args)
             ades.append(ade)
             fdes.append(fde)
         average_ades = sum(ades) / tasks

@@ -97,7 +97,7 @@ def cal_ade_fde(pred_traj_gt, pred_traj_fake):
     fde_ = utils.final_displacement_error(pred_traj_fake[-1], pred_traj_gt[-1], mode="raw")
     return ade_, fde_
 
-def evaluate(loader, predictor):
+def evaluate(loader, predictor,args):
     ade_outer, fde_outer = [], []
     total_traj = 0
     with torch.no_grad():
@@ -118,7 +118,10 @@ def evaluate(loader, predictor):
             pred_len = pred_traj_gt.size(0)   # （seq,batch(ped),position)
 
             for _ in range(1):
-                pred_traj_fake_rel,_,_,_,_,_ = predictor(obs_traj_rel, seq_start_end)
+                if args.feedback==True:
+                    pred_traj_fake_rel,_,_,_,_,_ = predictor(obs_traj_rel, seq_start_end)
+                else:
+                    pred_traj_fake_rel = predictor(obs_traj_rel, seq_start_end)
                 pred_traj_fake = utils.relative_to_abs(pred_traj_fake_rel, obs_traj[-1]) 
                 ade_, fde_ = cal_ade_fde(pred_traj_gt, pred_traj_fake)     #因为rel-》abs， 所以对比的是绝对坐标的差距。
                 ade.append(ade_)  # 一个batch中 多条traj 得到一个batch的ade，fde值。（batch，1） ， （batch，1）
