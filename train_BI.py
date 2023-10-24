@@ -32,7 +32,7 @@ def train(args, model, train_loader, optimizer, epoch, writer):
 
         ###################################################
         model_input = torch.cat((obs_traj_rel, pred_traj_gt_rel), dim=0)  # 输入lstm的是相对位置值(个体自己的相对值，不是和他人。)
-        pred_traj_fake_rel = model(model_input, seq_start_end)    # seq_start_end =  [[start,end],[..],[..]]  #  output (pred_len, batch,2)
+        pred_traj_fake_rel,_,_,_,_,_ = model(model_input, seq_start_end)    # seq_start_end =  [[start,end],[..],[..]]  #  output (pred_len, batch,2)
         l2_loss_rel = utils.l2_loss(
             pred_traj_fake_rel,
             model_input[-args.pred_len:],
@@ -74,6 +74,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
     Exact = Generative = Current = False
     previous_model = None
     memory_batch = []
+    U_info=None  # for first task. No replay,only main forward.
+    obs_traj_record = None 
 
     # global x_rel_val, y_rel_val, seq_start_end_val
 
@@ -194,6 +196,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     replay_data_loader = iter(
                         data_loader(args, train_dataset, args.replay_batch_size))  # replay_batch_size=512   # 用的是当前数据集！
                     replay_out = next(replay_data_loader)   # 扔进来一个batch，只是这个batch有点大
+                    obs_traj_record=replay_out[0].to(device)
                     if args.hidden ==False:  # no hidden replay. sample as normal.
                         if args.replay_model == 'lstm':
                             # replay_traj = previous_generator.sample(x_rel, obs_traj, seq_start_end)  # previous generator就是 deepcopy的前一个generator
@@ -219,6 +222,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                                     replay_out[6].to(device))  #here previous_generator is actaully combined model's full part.
                             x_rel_ = decode_h
                             _,seq_start_end_ = U_info
+                            
 
                         if args.replay_model == 'vrnn':
                             pass # didn't use VRNN to test internal replay.
@@ -257,9 +261,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         
                     previous_model.eval()
                     if args.hidden ==False:
-                        y_rel_ = previous_model(x_rel_, seq_start_end_)
+                        y_rel_,_,_,_,_,_ = previous_model(x_rel_, seq_start_end_)
                     else: #x_rel_ here is LSTM hidden
-                        y_rel_ =previous_model.predict(x_rel_, not_hidden=False,U_info=U_info)  ##YZ
+                        y_rel_,_,_,_,_,_ =previous_model(x_rel_, seq_start_end_ ,input_not_hidden=False,U_info=U_info,obs_traj_record=obs_traj_record)  ##YZ
 
                 # Get target scores and labels (i.e., [scores_] / [y_]) -- using previous model, with no_grad()
                 # -if there are no task-specific mask, obtain all predicted scores at once
@@ -275,7 +279,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 if batch_index <= iters*batch_num:    # index是指示在这个dataset中的第多少个batch，从这里限制每个task每一个epoch训练次数不超过iters
 
                     # Train the main model with this batch     ## ?? train a model 会用 surrogate_loss（忽略） , first task 怎么解决有的参数不存在的问题？？
-                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_rel_=x_rel_, y_rel_=y_rel_, seq_start_end_=seq_start_end_,U_info=U_info, loss_mask=loss_mask, rnt=1./task,obs_traj_record=replay_out[0].to(device))  # obs_seq_list=>obs_traj
+                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_,U_info=U_info, loss_mask=loss_mask, rnt=1./task,obs_traj_record=obs_traj_record)  # obs_seq_list=>obs_traj
                     main_loss_file = open("{}/loss_main_model_{}_{}_{}_{}.txt".format(args.r_dir, args.iters, args.batch_size, args.replay, args.val_class), 'a')   # 字符 'a' 表示以附加（append）模式打开文件
                     main_loss_file.write('{}: {}\n'.format(batch_index, loss_dict_main['loss_total']))  ## ?? 这里是在记录loss日志
                     main_loss_file.close()
@@ -544,7 +548,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
             progress_gen.close()
 
         if args.val:
-            model = copy.deepcopy(previous_model)    # 所以现在练完 综合最好的model 就会回到main
+            model = copy.deepcopy(previous_model)    # 所以现在练完 综合最好的model 就会深拷贝成为model，即出现新的model（与之前的浅拷贝来自main的model 不再关联）
         # Calculate statistics required for metrics
         for metric_cb in metric_cbs:
             if metric_cb is not None:

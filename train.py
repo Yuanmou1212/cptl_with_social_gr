@@ -521,7 +521,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     sample_cb(generator, epoch, task=task)
 
         # ----> UPON FINISHING EACH TASK...
-        # 跑完所有epoch/一个task的
+        # 跑完一个task的 所有epoch后
         # Close progress-bar(s)
         progress.close()
         if generator is not None:

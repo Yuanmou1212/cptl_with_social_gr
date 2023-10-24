@@ -99,11 +99,13 @@ cl_params.add_argument('--epsilon', type=float, default=0.1, dest="epsilon", hel
 eval_params = parser.add_argument_group('Evaluation Parameters')
 eval_params.add_argument('--time', action='store_true', help="keep track of total training time")
 eval_params.add_argument('--metrics', action='store_true', help="calculate additional metrics (e.g., BWT, forgetting)")
-eval_params.add_argument('--pdf', action='store_false', help="generator pdf with results")
+eval_params.add_argument('--pdf', action='store_true', help="generator pdf with results")
 eval_params.add_argument('--visdom', action='store_true', help="use visdom for on-the-fly plots")
 eval_params.add_argument('--val', action='store_true', help="use validation data")
+#eval_params.add_argument('--val', action='store_false', help="use validation data")
 class_choices = ['current', 'all', 'replay']
-eval_params.add_argument('--val_class', default='current', type=str, choices=class_choices, help='whether use current or previous task validation data')
+#eval_params.add_argument('--val_class', default='current', type=str, choices=class_choices, help='whether use current or previous task validation data')
+eval_params.add_argument('--val_class', default='all', type=str, choices=class_choices, help='whether use current or previous task validation data')
 eval_params.add_argument('--log-per-task', action='store_true', help="set all visdom-logs to [iters]")
 eval_params.add_argument('--loss-log', type=int, default=20, metavar="N", help="iters after which to plot loss")
 eval_params.add_argument('--prec-log', type=int, default=20, metavar="N", help="iters after which to plot precision")
@@ -125,8 +127,12 @@ batch_params.add_argument("--checkpoint_log", default=50, type=int, help="iters 
 # Brain-inspired method #YZ
 BI_params = parser.add_argument_group('Brain inspired method parameters')
 BI_params.add_argument('--feedback',action='store_true',help= 'replay through feedback methdod ')
-BI_params.add_argument('--internal',action='store_true',help= 'internal replay')
-
+#BI_params.add_argument('--feedback',action='store_false',help= 'replay through feedback methdod ')
+BI_params.add_argument('--hidden',action='store_true',help= 'internal replay')
+#BI_params.add_argument('--hidden',action='store_false',help= 'internal replay')
+BI_params.add_argument('--pre_train',action='store_true',help= 'use pre-train model')
+BI_params.add_argument('--init_weight',action="store_true",help ='initilize weight')
+BI_params.add_argument('--init_bias',action='store_true',help="initialize bias")
 
 def run(args, verbose=False):                                   #verbose 输入是true， 记得是输出详情
 
@@ -364,11 +370,12 @@ def run(args, verbose=False):                                   #verbose 输入�
         #     ).to(device)
 
         if args.feedback == True:  # for combined model #YZ
+            if args.hidden == True and args.pre_train == True: # freeze encoder.
             # initial weigth,bias/ use pre-trained / freeze model (encoder LSTM)
-            from BI_utils import initialize
-            model = initialize(model) ## YZ , write function  . need match!!
-            for param in model.encoder_lstm.parameters(): # encoder should be FC+LSTM
-                param.require_grad = False 
+                from BI_utils import initialize
+                model=initialize.initialize_model(model,args) ## YZ , write function  . need match!!   initilize use all 4 tasks, might be a problem!maybe start should be 1task YZ
+                for param in model.traj_lstm_model_encoder.parameters(): # encoder should be FC+LSTM
+                    param.require_grad = False 
             # define optimizer
             model.optim_type = args.optimizer
             model.optim_list = [
@@ -384,6 +391,9 @@ def run(args, verbose=False):                                   #verbose 输入�
         else: # separater model and generator.
             # Define optimizer (only include parameters that "requires_grad")   
             model.optim_type = args.optimizer
+            model.optim_list = [
+        {'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.lr},
+    ]
             if model.optim_type in ("adam", "adam_reset"):
                 model.optimizer = optim.Adam(model.parameters(), lr=args.lr)
             elif model.optim_type == "sgd":
@@ -607,10 +617,11 @@ def run(args, verbose=False):                                   #verbose 输入�
         #------OUTPUT-------#
         #-------------------# #
 
-        # Average precision on full test set
-        output_file = open("{}/prec-{replay}-{iters}-{z_dim}-{batch_size}-{replay_batch_size}-{lr}-{aug}-{main_model}-{train_order}-{seed}-{val}-{val_class}-si{si}-{si_c}.txt".format(args.r_dir, replay=args.replay, iters=args.iters, z_dim=args.z_dim, batch_size=args.batch_size, replay_batch_size=args.replay_batch_size, lr=args.lr, aug=args.aug, main_model=model.name, train_order=args.dataset_order, seed=args.seed, val=args.val, val_class=args.val_class, si=args.si, si_c=args.si_c), "w")
-        output_file.write('Training:{order}\nADEs:{ades}\nADE:{ade}\nFDEs:{fdes}\nFDE:{fde}'.format(order=train_order,ades=ades, ade=average_ades, fdes=fdes, fde=average_fdes))
-        output_file.close()
+        ## cause bug, coment it out
+        ## Average precision on full test set
+        # output_file = open("{}/prec-{replay}-{iters}-{z_dim}-{batch_size}-{replay_batch_size}-{lr}-{aug}-{main_model}-{train_order}-{seed}-{val}-{val_class}-si{si}-{si_c}.txt".format(args.r_dir, replay=args.replay, iters=args.iters, z_dim=args.z_dim, batch_size=args.batch_size, replay_batch_size=args.replay_batch_size, lr=args.lr, aug=args.aug, main_model=model.name, train_order=args.dataset_order, seed=args.seed, val=args.val, val_class=args.val_class, si=args.si, si_c=args.si_c), "w")
+        # output_file.write('Training:{order}\nADEs:{ades}\nADE:{ade}\nFDEs:{fdes}\nFDE:{fde}'.format(order=train_order,ades=ades, ade=average_ades, fdes=fdes, fde=average_fdes))
+        # output_file.close()
 
         #------------------------------------------------------------------------------------------------------------------#
 
