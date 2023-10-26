@@ -471,7 +471,7 @@ class Model_RTF(Replayer):
                 traj_rel,_ = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel)
             # relative to absolute
             traj = relative_to_abs(traj_rel, obs_traj[0]) # obs_traj 即 additional info中的 intial position 
-            replay_traj = [traj, traj_rel, replay_seq_start_end]
+            replay_traj = [traj, traj_rel, replay_seq_start_end]    
             # returen samples as [batch_size]x[traj_size] tensor
             # set model back to its initial mode
             self.train(mode=mode)

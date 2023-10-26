@@ -137,7 +137,7 @@ def evaluate(loader, predictor,args):
         return ade, fde
 
 
-def validate(model, dataset_name, batch_size=128, test_size=1024, verbose=True):   # main中调用，输入的是 test dataset 。 所以这个函数就是evaluate功能
+def validate(model, dataset_name,args, batch_size=128, test_size=1024, verbose=True):   # main中调用，输入的是 test dataset 。 所以这个函数就是evaluate功能
     '''
     Evaluate precision (ADE and FDE) of a predictor ([model]) on [dataset].
     '''
@@ -154,7 +154,7 @@ def validate(model, dataset_name, batch_size=128, test_size=1024, verbose=True):
     data_type = ".txt"
     _, test_loader = data_loader(args, test_path, dataset_name, data_type)
     ''' 
-    ade, fde = evaluate(dataset_name, model)    # 扔进去的是dataloader
+    ade, fde = evaluate(dataset_name, model,args=args)    # 扔进去的是dataloader
 
     # Set model back to its initial mode, print result on screen (if requested) and return it
     model.train(mode=mode)

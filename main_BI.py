@@ -356,7 +356,7 @@ def run(args, verbose=False):                                   #verbose 输入�
                     traj_lstm_input_size=args.traj_lstm_input_size,
                     traj_lstm_hidden_size=args.traj_lstm_hidden_size,
                     traj_lstm_output_size=args.traj_lstm_output_size,
-                    hidden= True
+                    hidden= args.hidden
                 ).to(device) # This model include main model+ generator
                 # here add combined method. #YZ
         
