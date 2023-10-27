@@ -379,8 +379,8 @@ def run(args, verbose=False):                                   #verbose 输入�
             # define optimizer
             model.optim_type = args.optimizer
             model.optim_list = [
-        {'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.lr},
-    ]
+            {'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.lr},
+            ]
             if model.optim_type in ("adam", "adam_reset"):
                 model.optimizer = optim.Adam(model.optim_list, lr=args.lr)
             elif model.optim_type == "sgd":
@@ -392,8 +392,8 @@ def run(args, verbose=False):                                   #verbose 输入�
             # Define optimizer (only include parameters that "requires_grad")   
             model.optim_type = args.optimizer
             model.optim_list = [
-        {'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.lr},
-    ]
+            {'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.lr},
+            ]
             if model.optim_type in ("adam", "adam_reset"):
                 model.optimizer = optim.Adam(model.parameters(), lr=args.lr)
             elif model.optim_type == "sgd":

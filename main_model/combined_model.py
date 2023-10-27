@@ -187,6 +187,10 @@ class Model_RTF(Replayer):
             batch_norm=batch_norm,
             dropout=dropout )
         
+        ## Reconstronction decoder
+        self.recon_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_output_size)
+        self.recon_hidden2pos = nn.Linear(self.traj_lstm_output_size, 2)
+        
         ##>--- Predictor (from hidden state to traj)---<##
         # -hidden state
         self.pred_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_output_size)
@@ -262,10 +266,10 @@ class Model_RTF(Replayer):
         decode_h = pred_lstm_h_t  # before LSTM.
         pred_traj_pos += [output]  ## output是(batch, 2)，也是一个时间步的结果。
         for i in range(self.obs_len-1):        #  # ？？lack a cancatenate with hidden state again as input to LSTM like that paper？ 有个问题， 那篇论文再decode部分 采用的是 pool后的结果和上一步的hidden state 拼接起来进LSTM的。！
-            pred_lstm_h_t, pred_lstm_c_t = self.pred_lstm_model(
+            pred_lstm_h_t, pred_lstm_c_t = self.recon_lstm_model(
                 output, (pred_lstm_h_t, pred_lstm_c_t)  # todo whether use teach force, input_t --> output
             )
-            output = self.pred_hidden2pos(pred_lstm_h_t)
+            output = self.recon_hidden2pos(pred_lstm_h_t)
             pred_traj_pos += [output]
         outputs = torch.stack(pred_traj_pos)
         return outputs,decode_h
