@@ -402,6 +402,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                 val_loss_cb(progress, epoch, loss_val_dict_main, task=task)
                         ade_val = ade_current + ade_previous
                         is_best = ade_val < best_ade     # best 每个task结束 reset 一次200. 所以依然会在进行新task时得到最好的model
+                        best_ade = min(ade_val, best_ade)
                         if is_best:
                             previous_model = copy.deepcopy(model)
                             #file_dir = os.path.dirname(__file__) + "/chekpoint"
