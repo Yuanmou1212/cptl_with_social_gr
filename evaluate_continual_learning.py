@@ -80,6 +80,7 @@ parser.add_argument("--gpu_index", default=0, type=int)
 
 ## BI method
 parser.add_argument('--feedback',action='store_true',help= 'replay through feedback methdod ')
+parser.add_argument('--hidden',action='store_true',help= 'internal replay')
 
 def get_model(checkpoint):  
     device = torch.device('cuda', index=args.gpu_index) if torch.cuda.is_available() else torch.device('cpu')
@@ -101,7 +102,7 @@ def get_model(checkpoint):
                     traj_lstm_input_size=args.traj_lstm_input_size,
                     traj_lstm_hidden_size=args.traj_lstm_hidden_size,
                     traj_lstm_output_size=args.traj_lstm_output_size,
-                    hidden= True
+                    hidden= args.hidden
                 ).to(device)
     if args.main_model == "gat":
         n_units = (
