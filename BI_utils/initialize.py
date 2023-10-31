@@ -23,10 +23,10 @@ def initialize_model(model,args):
         weight_hh=check_point['traj_lstm_model.weight_hh']
         bias_ih = check_point['traj_lstm_model.bias_ih']
         bias_hh = check_point['traj_lstm_model.bias_hh']
-        model.traj_lstm_model_encoder.weight_ih.data = weight_ih
-        model.traj_lstm_model_encoder.weight_hh.data = weight_hh
-        model.traj_lstm_model_encoder.bias_ih.data = bias_ih
-        model.traj_lstm_model_encoder.bias_hh.data = bias_hh
+        model.traj_lstm_model.weight_ih.data = weight_ih
+        model.traj_lstm_model.weight_hh.data = weight_hh
+        model.traj_lstm_model.bias_ih.data = bias_ih
+        model.traj_lstm_model.bias_hh.data = bias_hh
 
     return model
 

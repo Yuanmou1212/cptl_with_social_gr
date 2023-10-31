@@ -35,6 +35,7 @@ parser.add_argument("--loadpth",action='store_true',help="load data from pth for
 # task number. how many task we need to process.
 num_choices=[1,2,3,4]
 parser.add_argument('--num-task',type=int,default=4,choices=num_choices,dest="num_task",help="number of tasks need to process")
+parser.add_argument('--pre_train',action='store_true',help= 'use pre-train model')
 
 # training hyperparameters / initialization
 train_params = parser.add_argument_group('Training Parameters')                                    # 分组只是为了help时方便查看，不影响args.name的调用
@@ -99,7 +100,7 @@ cl_params.add_argument('--epsilon', type=float, default=0.1, dest="epsilon", hel
 eval_params = parser.add_argument_group('Evaluation Parameters')
 eval_params.add_argument('--time', action='store_true', help="keep track of total training time")
 eval_params.add_argument('--metrics', action='store_true', help="calculate additional metrics (e.g., BWT, forgetting)")
-eval_params.add_argument('--pdf', action='store_false', help="generator pdf with results")
+eval_params.add_argument('--pdf', action='store_true', help="generator pdf with results")
 eval_params.add_argument('--visdom', action='store_true', help="use visdom for on-the-fly plots")
 eval_params.add_argument('--val', action='store_true', help="use validation data")
 class_choices = ['current', 'all', 'replay']
@@ -121,7 +122,13 @@ batch_params.add_argument("--print_every", default=10, type=int)
 batch_params.add_argument("--resume", default="", type=str, metavar="PATH", help="path to latest checkpoint (default: none)")
 batch_params.add_argument("--checkpoint_log", default=50, type=int, help="iters after which to save checkpoint")
 
-
+BI_params = parser.add_argument_group('Brain inspired method parameters')
+BI_params.add_argument('--feedback',action='store_true',help= 'replay through feedback methdod ')
+#BI_params.add_argument('--feedback',action='store_false',help= 'replay through feedback methdod ')
+BI_params.add_argument('--hidden',action='store_true',help= 'internal replay')
+#BI_params.add_argument('--hidden',action='store_false',help= 'internal replay')
+BI_params.add_argument('--init_weight',action="store_true",help ='initilize weight')
+BI_params.add_argument('--init_bias',action='store_true',help="initialize bias")
 
 
 def run(args, verbose=False):                                   #verbose 输入是true， 记得是输出详情
@@ -345,6 +352,22 @@ def run(args, verbose=False):                                   #verbose 输入�
                 n_units=n_units, n_heads=n_heads, graph_network_out_dims=args.graph_network_out_dims,
                 dropout=args.dropout, alpha=args.alpha, graph_lstm_hidden_size=args.graph_lstm_hidden_size
             ).to(device)
+
+        # pre-train comparation
+        if args.pre_train == True:
+            file_dir = os.path.join(os.path.dirname(__file__),'model_params','BEST_MODEL')
+            file_name = os.path.join(file_dir,'BEST.path')
+            check_point = torch.load(file_name)
+            weight_ih=check_point['traj_lstm_model.weight_ih']#.state_dict() traj_lstm_model.weight_ih,... is print out
+            weight_hh=check_point['traj_lstm_model.weight_hh']
+            bias_ih = check_point['traj_lstm_model.bias_ih']
+            bias_hh = check_point['traj_lstm_model.bias_hh']
+            model.traj_lstm_model.weight_ih.data = weight_ih
+            model.traj_lstm_model.weight_hh.data = weight_hh
+            model.traj_lstm_model.bias_ih.data = bias_ih
+            model.traj_lstm_model.bias_hh.data = bias_hh
+            # for param in model.traj_lstm_model.parameters(): # encoder should be FC+LSTM
+                #     param.require_grad = False 
 
         # Define optimizer (only include parameters that "requires_grad")
         model.optim_type = args.optimizer

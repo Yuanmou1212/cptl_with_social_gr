@@ -205,6 +205,8 @@ def main(args):
         for i in range(task):
             print(" - Task {}: ADE {:.4f} FDE {:.4f}".format(i+1, ades[i], fdes[i]))
         print("==> Average precision over all {} tasks: ADE {:.4f} FDE {:.4f}".format(task, average_ades, average_fdes))
+
+        
   
 if __name__ == "__main__":
     args = parser.parse_args()

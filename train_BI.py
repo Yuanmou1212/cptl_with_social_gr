@@ -132,7 +132,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
 
         # run epoch
         for epoch in range(1, iters_to_use+1):    # 是对每个task的dataset 独立的。 每个task 的epoch
-            losses_dict_main = {'loss_total':[], 'loss_current':[], 'loss_replay':[], 'pred_traj':[], 'pred_traj_r':[]}
+            losses_dict_main = {'loss_total':[], 'loss_current':[], 'loss_replay':[], 'pred_traj':[], 'pred_traj_r':[],'reconL':[],'variatL':[],'predL':[],'reconL_r':[],'variatL_r':[],'predL_r':[]}
             losses_dict_generative = {'loss_total':[], 'reconL':[], 'variatL':[], 'reconL_r':[], 'variatL_r':[]}
             for batch_index, batch in enumerate(training_dataset):  # 这个dataset 其实是dataloader的类，所以是iterable。
                 batch = [tensor.cuda() for tensor in batch]
@@ -288,6 +288,13 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     losses_dict_main['loss_replay'].append(loss_dict_main['loss_replay'])
                     losses_dict_main['pred_traj'].append(loss_dict_main['pred_traj'])
                     losses_dict_main['pred_traj_r'].append(loss_dict_main['pred_traj_r'])
+                    # to log loss
+                    losses_dict_main['reconL'].append(loss_dict_main['reconL'])
+                    losses_dict_main['variatL'].append(loss_dict_main['variatL'])
+                    losses_dict_main['predL'].append(loss_dict_main['predL'])
+                    losses_dict_main['reconL_r'].append(loss_dict_main['reconL_r'])
+                    losses_dict_main['variatL_r'].append(loss_dict_main['variatL_r'])
+                    losses_dict_main['predL_r'].append(loss_dict_main['predL_r'])
 
                     # Update running parameter importance estimates in W
                     if isinstance(model, ContinualLearner) and (model.si_c > 0):
@@ -580,7 +587,34 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
             # previous_datasets.append(previous_dataset)
             Exact=True
 
-
+        # Logging loss in different task/ after epochs
+        file_dir = os.path.dirname(__file__)
+        output_file = os.path.join(file_dir,'loss_values_{val_class}_{method}.txt'.format(val_class=args.val_class,method = args.method ))
+        if task == 1:
+            with open(output_file,'w') as file:  # Should I add average? or last several times?
+                file.write(f"Task:{task}\n")
+                file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
+                file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
+                file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
+                file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
+                file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
+                file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
+                file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
+                file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
+                file.write("\n") 
+        else:
+            with open(output_file,'a') as file:
+                file.write(f"Task:{task}\n")
+                file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
+                file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
+                file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
+                file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
+                file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
+                file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
+                file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
+                file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
+                file.write("\n") 
+            
 
 
 

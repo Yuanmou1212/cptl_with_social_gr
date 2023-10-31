@@ -164,7 +164,7 @@ class Model_RTF(Replayer):
         # -flatten traj to 2D-tensor
 
         # -hidden state
-        self.traj_lstm_model_encoder = nn.LSTMCell(traj_lstm_input_size, traj_lstm_hidden_size)
+        self.traj_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_hidden_size)
         # self.traj_lstm_model_encoder2= nn.LSTMCell(traj_lstm_input_size, traj_lstm_hidden_size)
         self.fcE = fc_layer(traj_lstm_hidden_size + bottleneck_dim, 128, batch_norm=None)
 
@@ -188,8 +188,8 @@ class Model_RTF(Replayer):
             dropout=dropout )
         
         ## Reconstronction decoder
-        self.recon_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_output_size)
-        self.recon_hidden2pos = nn.Linear(self.traj_lstm_output_size, 2)
+        # self.recon_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_output_size)
+        # self.recon_hidden2pos = nn.Linear(self.traj_lstm_output_size, 2)
         
         ##>--- Predictor (from hidden state to traj)---<##
         # -hidden state
@@ -266,10 +266,10 @@ class Model_RTF(Replayer):
         decode_h = pred_lstm_h_t  # before LSTM.
         pred_traj_pos += [output]  ## output是(batch, 2)，也是一个时间步的结果。
         for i in range(self.obs_len-1):        #  # ？？lack a cancatenate with hidden state again as input to LSTM like that paper？ 有个问题， 那篇论文再decode部分 采用的是 pool后的结果和上一步的hidden state 拼接起来进LSTM的。！
-            pred_lstm_h_t, pred_lstm_c_t = self.recon_lstm_model(
+            pred_lstm_h_t, pred_lstm_c_t = self.pred_lstm_model(
                 output, (pred_lstm_h_t, pred_lstm_c_t)  # todo whether use teach force, input_t --> output
             )
-            output = self.recon_hidden2pos(pred_lstm_h_t)
+            output = self.pred_hidden2pos(pred_lstm_h_t)
             pred_traj_pos += [output]
         outputs = torch.stack(pred_traj_pos)
         return outputs,decode_h
@@ -295,7 +295,7 @@ class Model_RTF(Replayer):
     #             )      # (1，batch, input_size)
     #         ):
     #             #print(input_t.shape)   # input shape ([1, 64, 2]) 后面的batch出现过 epoch([1, 72, 2]) torch.Size([1, 107, 2]) torch.Size([1, 143, 2]) 等等  （time，batch （ped），position ）
-    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model_encoder(
+    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
     #                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)  # dim 0 of input_t is 1, use squeeze to remove this dim  # 初始化的值都是二维的 squeeze掉的只能是时间，按照LSTM 的输入要求来看。留下的是【batch，input_size】 
     #             )
     #             traj_lstm_hidden_states += [traj_lstm_h_t]  # same like .append()
@@ -347,7 +347,7 @@ class Model_RTF(Replayer):
     #                 obs_traj_pos[: self.obs_len].size(0), dim=0
     #             )  # （1，batch，input_size） 每个时间步逐步输入LSTM
     #         ):
-    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model_encoder(
+    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
     #                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
     #             )  # （batch，input_size）  # shared encode part #YZ
     #             traj_lstm_hidden_states += [traj_lstm_h_t]
@@ -397,7 +397,7 @@ class Model_RTF(Replayer):
                         obs_traj_pos[: self.obs_len].size(0), dim=0
                     )  # （1，batch，input_size） 每个时间步逐步输入LSTM
                 ):
-                    traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model_encoder(
+                    traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
                         input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
                     )  # （batch，input_size）  # shared encode part #YZ
                     traj_lstm_hidden_states += [traj_lstm_h_t]
@@ -596,7 +596,7 @@ class Model_RTF(Replayer):
         self.train()
         # If frozen. set that part eval()
         if self.hidden == True:
-            self.traj_lstm_model_encoder.eval()
+            self.traj_lstm_model.eval()
 
         # Reset optimizer
         self.optimizer.zero_grad()
@@ -624,7 +624,7 @@ class Model_RTF(Replayer):
                     x_rel[: self.obs_len].size(0), dim=0  # 就是把单个时间步的tensor[1,...]给提了出来（input_t)用来循环。 其实取切片也可以做到
                 ) ):
 
-                    traj_lstm_h_t,_ = self.traj_lstm_model_encoder(input_t.squeeze(0),(traj_lstm_h_t, traj_lstm_c_t)) if self.hidden else x_rel
+                    traj_lstm_h_t,_ = self.traj_lstm_model(input_t.squeeze(0),(traj_lstm_h_t, traj_lstm_c_t)) if self.hidden else x_rel
                 x_rel = traj_lstm_h_t.unsqueeze(0) # replace x_rel with last x_h, and change size form(64,32)into(1,64,32) just to suit loss calculation
             # else: x_rel = x_rel
 
