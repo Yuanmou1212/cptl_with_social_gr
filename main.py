@@ -367,7 +367,7 @@ def run(args, verbose=False):                                   #verbose 输入�
             model.traj_lstm_model.bias_ih.data = bias_ih
             model.traj_lstm_model.bias_hh.data = bias_hh
             # for param in model.traj_lstm_model.parameters(): # encoder should be FC+LSTM
-                #     param.require_grad = False 
+            #         param.require_grad = False 
 
         # Define optimizer (only include parameters that "requires_grad")
         model.optim_type = args.optimizer

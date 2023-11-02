@@ -565,7 +565,7 @@ class Model_RTF(Replayer):
             if self.average:
                 pass         # todo
         else:
-            variatL = torch.tensor(0., device=self._device())
+            variatL = torch.tensor(-0.0, device=self._device())
 
         '''
         ###----Prediction loss----###
@@ -725,13 +725,13 @@ class Model_RTF(Replayer):
         # Return the dictionary with different training-loss split in categories
         return {
             'loss_total': loss_total.item(),
-            'loss_current':loss_cur.item() if x_rel is not None else 0,
-            'loss_replay': loss_replay.item() if (loss_replay is not None) and (x_rel is not None) else 0,
-            'reconL': reconL.item() if x_rel is not None else 0,
-            'variatL': variatL.item() if x_rel is not None else 0,
-            'predL': predL.item() if x_rel is not None else 0,
-            'reconL_r': sum(reconL_r).item()/n_replays if x_ is not None else 0,
-            'variatL_r': sum(variatL_r).item()/n_replays if x_ is not None else 0,
+            'loss_current':loss_cur.item() if x_rel is not None else 0,   # always have value
+            'loss_replay': loss_replay.item() if (loss_replay is not None) and (x_rel is not None) else 0,  # after task 1 always
+            'reconL': reconL.item() if x_rel is not None else 0,  # always
+            'variatL': variatL.item() if x_rel is not None else 0,  # ? sometimes 0 eg: task4 .. 5.9e-8 0.0 0.0 2.9e-8..  # 0.0 rather than 0, means it calculate itself as 0! rather than do not have !
+            'predL': predL.item() if x_rel is not None else 0,     # always
+            'reconL_r': sum(reconL_r).item()/n_replays if x_ is not None else 0,  # task 3 task 4 全是 0.0
+            'variatL_r': sum(variatL_r).item()/n_replays if x_ is not None else 0, # task 2 开始 就有 0.0 穿插
             'predL_r': sum(predL_r).item()/n_replays if x_ is not None else 0,
             'pred_traj': pred_traj.item() if pred_traj is not None else 0,
             'pred_traj_r': sum(pred_traj_r).item()/n_replays if (x_ is not None and pred_traj_r[0] is not None) else 0,

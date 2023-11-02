@@ -128,8 +128,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
         if not Exact and not Generative and not Current:
             x_rel_ = y_rel_ = seq_start_end_ = x_rel_gr = y_rel_gr = seq_start_end_gr = None  # -> if no replay
 
-
-
+        # record losses after each epoch! For combined_model RTF
+        losses_dict_main_epoch = {'loss_total':[], 'loss_current':[], 'loss_replay':[], 'pred_traj':[], 'pred_traj_r':[],'reconL':[],'variatL':[],'predL':[],'reconL_r':[],'variatL_r':[],'predL_r':[]}
         # run epoch
         for epoch in range(1, iters_to_use+1):    # 是对每个task的dataset 独立的。 每个task 的epoch
             losses_dict_main = {'loss_total':[], 'loss_current':[], 'loss_replay':[], 'pred_traj':[], 'pred_traj_r':[],'reconL':[],'variatL':[],'predL':[],'reconL_r':[],'variatL_r':[],'predL_r':[]}
@@ -194,8 +194,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     # Get replayed data (i.e., [x_]) -- either current data or use previous generator
                     # x_ = x if Current else previous_generator.sample(out.to(device))  # 64*500  ## when feedback is True ,here the previous_generator is actually previous model! #YZ
                     replay_data_loader = iter(
-                        data_loader(args, train_dataset, args.replay_batch_size))  # replay_batch_size=512   # 用的是当前数据集！
-                    replay_out = next(replay_data_loader)   # 扔进来一个batch，只是这个batch有点大
+                        data_loader(args, train_dataset, args.replay_batch_size))  # replay_batch_size=64 和 current dataset的一样   # 用的是当前数据集！
+                    replay_out = next(replay_data_loader)   # 扔进来一个batch
                     obs_traj_record=replay_out[0].to(device)
                     if args.hidden ==False:  # no hidden replay. sample as normal.
                         if args.replay_model == 'lstm':
@@ -322,6 +322,19 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])
                     losses_dict_generative['reconL_r'].append(loss_dict_generative['reconL_r'])
                     losses_dict_generative['variatL_r'].append(loss_dict_generative['variatL_r'])
+            
+            # record each epoch losses. each element means loss of all batch losses of one epoch.
+            import numpy as np
+            losses_dict_main_epoch['loss_total'].append(np.mean(losses_dict_main['loss_total'])) 
+            losses_dict_main_epoch['loss_current'].append(np.mean(losses_dict_main['loss_current']))
+            losses_dict_main_epoch['loss_replay'].append(np.mean(losses_dict_main['loss_replay']))
+            losses_dict_main_epoch['reconL'].append(np.mean(losses_dict_main['reconL']))
+            losses_dict_main_epoch['variatL'].append(np.mean(losses_dict_main['variatL']))
+            losses_dict_main_epoch['predL'].append(np.mean(losses_dict_main['predL']))
+            losses_dict_main_epoch['reconL_r'].append(np.mean(losses_dict_main['reconL_r']))
+            losses_dict_main_epoch['variatL_r'].append(np.mean(losses_dict_main['variatL_r']))
+            losses_dict_main_epoch['predL_r'].append(np.mean(losses_dict_main['predL_r']))
+            
 
             if args.val:   # 一个epoch后。前面是对一个dataset的 多个iteration 循环训练，练好了后，validate / 现在还都是在同一个task下面
                 if args.val_class == 'current':    #args.val_class :  whether use current or previous task validation data
@@ -508,6 +521,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 for val_loss_cb in val_loss_cbs:
                     if val_loss_cb is not None:
                         val_loss_cb(progress, epoch, loss_val_dict_main, task=task)
+            
+            
 
             # Main model
             # Fire callbacks (for visualization of training-progress / evaluating performance after each task)
@@ -549,6 +564,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     sample_cb(generator, epoch, task=task)
 
         # ----> UPON FINISHING EACH TASK...
+        # draw after a task finish all epoch
+        from BI_utils import visualize
+        visualize.visualize_loss_epoches(losses_dict_main_epoch,task) # every task, 2 images, each have 4 subplots.
 
         # Close progress-bar(s)
         progress.close()
@@ -588,32 +606,33 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
             Exact=True
 
         # Logging loss in different task/ after epochs
-        file_dir = os.path.dirname(__file__)
-        output_file = os.path.join(file_dir,'loss_values_{val_class}_{method}.txt'.format(val_class=args.val_class,method = args.method ))
-        if task == 1:
-            with open(output_file,'w') as file:  # Should I add average? or last several times?
-                file.write(f"Task:{task}\n")
-                file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
-                file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
-                file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
-                file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
-                file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
-                file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
-                file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
-                file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
-                file.write("\n") 
-        else:
-            with open(output_file,'a') as file:
-                file.write(f"Task:{task}\n")
-                file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
-                file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
-                file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
-                file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
-                file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
-                file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
-                file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
-                file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
-                file.write("\n") 
+        if args.feedback == True:
+            file_dir = os.path.dirname(__file__)
+            output_file = os.path.join(file_dir,'loss_values_{val_class}_{method}.txt'.format(val_class=args.val_class,method = args.method ))
+            if task == 1:
+                with open(output_file,'w') as file:  # Should I add average? or last several times?
+                    file.write(f"Task:{task}\n")
+                    file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
+                    file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
+                    file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
+                    file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
+                    file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
+                    file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
+                    file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
+                    file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
+                    file.write("\n") 
+            else:
+                with open(output_file,'a') as file:
+                    file.write(f"Task:{task}\n")
+                    file.write('Current_loss:{}\n'.format(losses_dict_main['loss_current']))
+                    file.write('Current_loss_predict:{}\n'.format(losses_dict_main['predL']))
+                    file.write('Current_loss_variant:{}\n'.format(losses_dict_main['variatL']))
+                    file.write('Current_loss_reconstruct:{}\n'.format(losses_dict_main['reconL']))
+                    file.write('Replay_loss:{}\n'.format(losses_dict_main['loss_replay']))
+                    file.write('Replay_loss_predict:{}\n'.format(losses_dict_main['predL_r']))
+                    file.write('Replay_loss_variant:{}\n'.format(losses_dict_main['variatL_r']))
+                    file.write('Replay_loss_reconstruct:{}\n'.format(losses_dict_main['reconL_r']))
+                    file.write("\n") 
             
 
 

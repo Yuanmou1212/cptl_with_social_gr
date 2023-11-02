@@ -374,8 +374,8 @@ def run(args, verbose=False):                                   #verbose 输入�
             # initial weigth,bias/ use pre-trained / freeze model (encoder LSTM)
                 from BI_utils import initialize
                 model=initialize.initialize_model(model,args) ## YZ , write function  . need match!!   initilize use all 4 tasks, might be a problem!maybe start should be 1task YZ
-                # for param in model.traj_lstm_model.parameters(): # encoder should be FC+LSTM
-                #     param.require_grad = False 
+                for param in model.traj_lstm_model.parameters(): # encoder should be FC+LSTM
+                    param.require_grad = False 
             # define optimizer
             model.optim_type = args.optimizer
             model.optim_list = [
