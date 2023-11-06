@@ -258,7 +258,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 if batch_index <= iters*batch_num:    # index是指示在这个dataset中的第多少个batch，从这里限制每个task每一个epoch训练次数不超过iters
 
                     # Train the main model with this batch     ## ?? train a model 会用 surrogate_loss（忽略） , first task 怎么解决有的参数不存在的问题？？
-                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_rel_=x_rel_, y_rel_=y_rel_, seq_start_end_=seq_start_end_, loss_mask=loss_mask, rnt=1./task)
+                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, loss_mask=loss_mask, rnt=1./task)
                     main_loss_file = open("{}/loss_main_model_{}_{}_{}_{}.txt".format(args.r_dir, args.iters, args.batch_size, args.replay, args.val_class), 'a')   # 字符 'a' 表示以附加（append）模式打开文件
                     main_loss_file.write('{}: {}\n'.format(batch_index, loss_dict_main['loss_total']))  ## ?? 这里是在记录loss日志
                     main_loss_file.close()

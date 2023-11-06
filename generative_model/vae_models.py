@@ -1,9 +1,10 @@
 from helper.replayer import Replayer
 import torch
 import torch.nn as nn
-from generative_model.linear_nets import fc_layer,fc_layer_split
+from generative_model.linear_nets import fc_layer,fc_layer_split,fc_layer_fixed_gates
 
 from helper.utils import relative_to_abs
+import numpy as np
 
 
 def make_mlp(dim_list, activation='relu', batch_norm=True, dropout=0):
@@ -108,7 +109,10 @@ class AutoEncoder(Replayer):
             mlp_dim=256,
             bottleneck_dim=32,
             activation='relu',
-            batch_norm=True
+            batch_norm=True,
+            gate_decoder = False,
+            gate_prob=0.,
+            tasks=4
     ):
         # Set configurations
         super().__init__()
@@ -132,6 +136,10 @@ class AutoEncoder(Replayer):
         self.mlp_dim = mlp_dim
         self.bottleneck_dim = bottleneck_dim
 
+        # BI-methods
+        self.gate_decoder = gate_decoder
+        self.gate_prob = gate_prob
+        self.tasks = tasks
 
 
         ###---------SPECIFY MODEL--------###
@@ -149,10 +157,14 @@ class AutoEncoder(Replayer):
 
 
         ##>---Decoder (=p[x|z])---<##
+        if self.gate_decoder!=True:     # YZ if decoder is gated or not.
         # -from z
-        self.fromZ = fc_layer(z_dim, 128, batch_norm=None)
-        # -fully connected hidden layers
-        self.fcD = fc_layer(128, traj_lstm_hidden_size, batch_norm=None)
+            self.fromZ = fc_layer(z_dim, 128, batch_norm=None)
+            # -fully connected hidden layers
+            self.fcD = fc_layer(128, traj_lstm_hidden_size, batch_norm=None)
+        else:
+            self.fromZ = fc_layer_fixed_gates(z_dim, 128, batch_norm=None,gating_prob=self.gate_prob, gate_size=self.tasks)
+            self.fcD = fc_layer_fixed_gates(128, traj_lstm_hidden_size, batch_norm=None,gating_prob=self.gate_prob, gate_size=self.tasks)
 
         # -hidden state
         self.pred_lstm_model = nn.LSTMCell(traj_lstm_input_size, traj_lstm_output_size)
@@ -206,9 +218,15 @@ class AutoEncoder(Replayer):
         eps = std.new(std.size()).normal_()      # .normal_() GPT 说是单维度的。
         return eps.mul(std).add_(mu)
 
-    def decode(self, z, seq_start_end, obs_traj_pos=None):
-        hD = self.fromZ(z)   # 从z中展开，是个MLP
-        hidden_features = self.fcD(hD)  # embedding 得到相同的特征维度。
+    def decode(self, z, seq_start_end, obs_traj_pos=None,gate_input=None):
+        if self.gate_decoder==True and gate_input is not None:
+            from BI_utils.process import to_one_hot
+            gate_input = to_one_hot(gate_input,gate_size=self.tasks,device='cuda')  # from 1D array to onehot array which is needed in those FC layers.
+            hD = self.fromZ(z,gate_input=gate_input)   # 从z中展开，是个MLP
+            hidden_features = self.fcD(hD,gate_input=gate_input)  # embedding 得到相同的特征维度。
+        else:
+            hD = self.fromZ(z)   
+            hidden_features = self.fcD(hD)  
         pred_lstm_h_t = hidden_features
         pred_lstm_c_t = torch.zeros_like(pred_lstm_h_t).cuda()
         pred_traj_pos = []
@@ -232,7 +250,7 @@ class AutoEncoder(Replayer):
     #     hD = self.fromZ(z)
 
 
-    def forward(self, obs_traj_pos, seq_start_end):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
+    def forward(self, obs_traj_pos, seq_start_end,gate_input=None):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
         batch = obs_traj_pos.shape[1] #todo define the batch
         traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
         # traj_lstm_h_t_2, traj_lstm_c_t_2 =self.init_obs_traj_lstm(batch)
@@ -277,14 +295,13 @@ class AutoEncoder(Replayer):
         # vae_input = final_encoder_h
         mu, logvar, hE = self.encode(vae_input)      
         z = self.reparameterize(mu, logvar)   # 自带sample
-        traj_recon = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos)
+        traj_recon = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos,gate_input=gate_input)
         return (traj_recon, mu, logvar, z) 
-
 
 
     ##------- SAMPLE FUNCTIONS -------##
 
-    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end): # 所谓的replay_seq_start_end 就是用新的task的dataset取的数据格式，来创建replay数据！ 即additional info中的number
+    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end,task_id_cur=None): # 所谓的replay_seq_start_end 就是用新的task的dataset取的数据格式，来创建replay数据！ 即additional info中的number
         '''Generate [size] samples from the model. Output is tensor (not "requiring grad"), on same device as <self>'''
 
         # set model to eval()-mode
@@ -297,16 +314,23 @@ class AutoEncoder(Replayer):
         # sample z 
         z = torch.randn(size, self.z_dim).to(self._device())  # 修改成多维高斯，这里采样可能也要变？
 
+        # tasks_
+        if self.gate_decoder == True:
+            freq = [1/(task_id_cur-1) for i in range(1,task_id_cur)]  # same probability to replay previous job.
+            tasks_=np.random.choice(list(range(1,task_id_cur)),size=size,p=freq)
+        else:
+            tasks_=None
+
         # decode z into traj x
         with torch.no_grad():
-            traj_rel = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel)
+            traj_rel = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel,gate_input=tasks_)
 
         # relative to absolute
         traj = relative_to_abs(traj_rel, obs_traj[0]) # obs_traj 即 additional info中的 intial position
 
         # set model back to its initial mode
         self.train(mode=mode)
-        replay_traj = [traj, traj_rel, replay_seq_start_end]
+        replay_traj = [traj, traj_rel, replay_seq_start_end,tasks_]
         # returen samples as [batch_size]x[traj_size] tensor
         return replay_traj
 
@@ -397,7 +421,7 @@ class AutoEncoder(Replayer):
 
     ##------- TRAINING FUNCTIONS -------##
 
-    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, rnt=0.5):
+    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, rnt=0.5,task=1,tasks_=None):
         '''Train model for one batch ([x],[y]),possibly supplemented with replayed data ([x_],[y_])
 
         [x]          <tensor> batch of past trajectory (could be None, in which case only 'replayed' data is used)
@@ -417,8 +441,14 @@ class AutoEncoder(Replayer):
         precision = 0.
         if x_rel is not None:
 
+            # If using task gating method, create task_tensor, used for decoder.
+            task_tensor = None
+            if self.gate_decoder == True: # x_rel is [obs,batch,postion] so use 1 to get batch dim
+                task_tensor = torch.tensor(np.repeat(task,x_rel.size(1))).to(self._device())  # tensor [batch_size,]     each element means which task a single element(element in a batch) belongs to . eg belongs to task1 number is 1
+            gate_input = task_tensor if self.gate_decoder else None
+
             # Run the model
-            recon_batch, mu, logvar, z = self(x_rel, seq_start_end)
+            recon_batch, mu, logvar, z = self(x_rel, seq_start_end,gate_input=gate_input)
 
             # If needed (e.g., Task-IL or Class-IL scenario), remove predictions for classes not in current task
             # if active_classes is not None:
@@ -451,17 +481,22 @@ class AutoEncoder(Replayer):
             variatL_r = [None]*n_replays
             predL_r = [None]*n_replays
 
+            if self.gate_decoder == True:
+                gate_input = tasks_
+            else:
+                gate_input = None
+
             # Run model (if [x_] is not a list with separate replay per task)
             if (not type(x_)==list):
                 x_temp_ = x_
-                recon_batch, mu, logvar, z = self(x_temp_, seq_start_end_)
+                recon_batch, mu, logvar, z = self(x_temp_, seq_start_end_,gate_input=gate_input)
             # Loop to perform each replay
             for replay_id in range(n_replays):
 
                 # -if [x_] is a list with separate replay per task, evaluate model on this task's replay
                 if (type(x_)==list):
                     x_temp_ = x_[replay_id]
-                    recon_batch, mu, logvar, z = self(x_temp_)
+                    recon_batch, mu, logvar, z = self(x_temp_,gate_input=gate_input)
 
                 # Calculate all losses
                 reconL_r[replay_id], variatL_r[replay_id] = self.loss_function(

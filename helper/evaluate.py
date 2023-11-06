@@ -118,7 +118,7 @@ def evaluate(loader, predictor,args):
             pred_len = pred_traj_gt.size(0)   # （seq,batch(ped),position)
 
             for _ in range(1):
-                if args.feedback==True:
+                if args.feedback==True: # predictor when RTF is also model, so need a function
                     pred_traj_fake_rel = predictor.infer(obs_traj_rel, seq_start_end)
                 else:
                     pred_traj_fake_rel = predictor(obs_traj_rel, seq_start_end)

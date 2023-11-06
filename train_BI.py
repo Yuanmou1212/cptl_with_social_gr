@@ -7,6 +7,7 @@ from helper.continual_learner import ContinualLearner
 from data.loader import data_loader, data_dset
 from torch.autograd import Variable
 import shutil
+from torch import optim
 
 def train(args, model, train_loader, optimizer, epoch, writer):
     losses = utils.AverageMeter("Loss", ":.6f")
@@ -65,7 +66,6 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
     # 这儿的 generator 才是要SGR， model 是 main model
     # Set model in training-mode
     model.train()
-
     # Use cuda?
     cuda = model._is_on_cuda()
     device = model._device()
@@ -73,6 +73,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
     # Initiate possible sources for replay (no replay for 1st task)
     Exact = Generative = Current = False
     previous_model = None
+    optimizer=None
     memory_batch = []
     U_info=None  # for first task. No replay,only main forward.
     obs_traj_record = None 
@@ -207,7 +208,10 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                             x_ = replay_traj[0]  #absolute position is not used . 
                             seq_start_end_ = replay_traj[2]
                             # gate based method
-                            tasks_=(replay_traj[3])
+                            if args.gate_decoder == True:    
+                                tasks_=(replay_traj[3])
+                            else:
+                                tasks_=None
 
                             # new：add y_rel_   otherwise, train a batch will raise error!
                             #y_rel_ = previous_model(x_rel_, seq_start_end_)
@@ -264,9 +268,10 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         seq_start_end_ = memory_seq[4].cuda()
                         
                     previous_model.eval()
-                    
-                    y_rel_ =previous_model.infer(x_rel_, seq_start_end_ )  ##YZ original main have no infer function
-
+                    if args.feedback==True:
+                        y_rel_ =previous_model.infer(x_rel_, seq_start_end_ )  ##YZ original main have no infer function
+                    else:
+                        y_rel_ =previous_model(x_rel_, seq_start_end_ )
                 # Get target scores and labels (i.e., [scores_] / [y_]) -- using previous model, with no_grad()
                 # -if there are no task-specific mask, obtain all predicted scores at once
                 if Generative and x_rel_ is not None:
@@ -291,12 +296,13 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     losses_dict_main['pred_traj'].append(loss_dict_main['pred_traj'])
                     losses_dict_main['pred_traj_r'].append(loss_dict_main['pred_traj_r'])
                     # to log loss
-                    losses_dict_main['reconL'].append(loss_dict_main['reconL'])
-                    losses_dict_main['variatL'].append(loss_dict_main['variatL'])
-                    losses_dict_main['predL'].append(loss_dict_main['predL'])
-                    losses_dict_main['reconL_r'].append(loss_dict_main['reconL_r'])
-                    losses_dict_main['variatL_r'].append(loss_dict_main['variatL_r'])
-                    losses_dict_main['predL_r'].append(loss_dict_main['predL_r'])
+                    if args.feedback==True:
+                        losses_dict_main['reconL'].append(loss_dict_main['reconL'])
+                        losses_dict_main['variatL'].append(loss_dict_main['variatL'])
+                        losses_dict_main['predL'].append(loss_dict_main['predL'])
+                        losses_dict_main['reconL_r'].append(loss_dict_main['reconL_r'])
+                        losses_dict_main['variatL_r'].append(loss_dict_main['variatL_r'])
+                        losses_dict_main['predL_r'].append(loss_dict_main['predL_r'])
 
                     # Update running parameter importance estimates in W
                     if isinstance(model, ContinualLearner) and (model.si_c > 0):
@@ -318,7 +324,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 if generator is not None and batch_index <= gen_iters*batch_num:   # 这是说明，同一次batch经过时，先train model 再train generator，有可能出现model停了，generator继续train的情况（dataloader没放完的情况）
                     # when replay through feedback, generator is None.##YZ
                     # Train the generator with this batch
-                    loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task,task=task)
+                    loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_)
                     losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
                     losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
                     losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])
@@ -326,17 +332,18 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     losses_dict_generative['variatL_r'].append(loss_dict_generative['variatL_r'])
             
             # record each epoch losses. each element means loss of all batch losses of one epoch.
-            import numpy as np
-            losses_dict_main_epoch['loss_total'].append(np.mean(losses_dict_main['loss_total'])) 
-            losses_dict_main_epoch['loss_current'].append(np.mean(losses_dict_main['loss_current']))
-            losses_dict_main_epoch['loss_replay'].append(np.mean(losses_dict_main['loss_replay']))
-            losses_dict_main_epoch['reconL'].append(np.mean(losses_dict_main['reconL']))
-            losses_dict_main_epoch['variatL'].append(np.mean(losses_dict_main['variatL']))
-            losses_dict_main_epoch['predL'].append(np.mean(losses_dict_main['predL']))
-            losses_dict_main_epoch['reconL_r'].append(np.mean(losses_dict_main['reconL_r']))
-            losses_dict_main_epoch['variatL_r'].append(np.mean(losses_dict_main['variatL_r']))
-            losses_dict_main_epoch['predL_r'].append(np.mean(losses_dict_main['predL_r']))
-            
+            if args.feedback == True:
+                import numpy as np
+                losses_dict_main_epoch['loss_total'].append(np.mean(losses_dict_main['loss_total'])) 
+                losses_dict_main_epoch['loss_current'].append(np.mean(losses_dict_main['loss_current']))
+                losses_dict_main_epoch['loss_replay'].append(np.mean(losses_dict_main['loss_replay']))
+                losses_dict_main_epoch['reconL'].append(np.mean(losses_dict_main['reconL']))
+                losses_dict_main_epoch['variatL'].append(np.mean(losses_dict_main['variatL']))
+                losses_dict_main_epoch['predL'].append(np.mean(losses_dict_main['predL']))
+                losses_dict_main_epoch['reconL_r'].append(np.mean(losses_dict_main['reconL_r']))
+                losses_dict_main_epoch['variatL_r'].append(np.mean(losses_dict_main['variatL_r']))
+                losses_dict_main_epoch['predL_r'].append(np.mean(losses_dict_main['predL_r']))
+                
 
             if args.val:   # 一个epoch后。前面是对一个dataset的 多个iteration 循环训练，练好了后，validate / 现在还都是在同一个task下面
                 if args.val_class == 'current':    #args.val_class :  whether use current or previous task validation data
@@ -385,7 +392,6 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         is_best = ade_val < best_ade
                         best_ade = min(ade_val, best_ade)
                         if is_best:
-                            previous_model = copy.deepcopy(model)
                             #file_dir = os.path.dirname(__file__) + "/chekpoint"
                             file_dir = os.path.join(os.path.dirname(__file__), "checkpoint")
                             if os.path.exists(file_dir) is False:
@@ -397,7 +403,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                         seed=args.seed, epoch=epoch,
                                                         val=args.val, val_class=args.val_class,
                                                         si=args.si, si_c=args.si_c))
-                            torch.save(model.state_dict(), filename)
+                            checkpoint={'model_state_dict': model.state_dict(),
+                                 'optimizer_state_dict': model.optimizer.state_dict()}
+                            torch.save(checkpoint, filename)
                             shutil.copyfile(filename,
                                             "{method}_{replay}_{task}_model_{order}_{batch_size}_{seed}_{val}_{val_class}_{si}_{si_c}.path".format(
                                                 method=args.method, replay=args.replay, task=task,
@@ -405,6 +413,32 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                 seed=args.seed,
                                                 val=args.val, val_class=args.val_class,
                                                 si=args.si, si_c=args.si_c))
+                            if args.feedback == True:
+                                previous_model = copy.deepcopy(model)
+                            else: # when use origianl SGR, problem comes out, bug say model have generator ,cannot pickle,cannot deepcopy
+                                from main_model.encoder import Predictor
+                                previous_model = Predictor(
+                                                        obs_len=args.obs_len,
+                                                        pred_len=args.pred_len,
+                                                        traj_lstm_input_size=args.traj_lstm_input_size,
+                                                        traj_lstm_hidden_size=args.traj_lstm_hidden_size,
+                                                        traj_lstm_output_size=args.traj_lstm_output_size
+                                                    ).to(device)
+                                previous_model.optim_type = args.optimizer
+                                previous_model.optim_list = [
+                                {'params': filter(lambda p: p.requires_grad, previous_model.parameters()), 'lr': args.lr},
+                                ]
+                                
+                                if previous_model.optim_type in ("adam", "adam_reset"):
+                                    previous_model.optimizer = optim.Adam(previous_model.optim_list, lr=args.lr)
+                                elif previous_model.optim_type == "sgd":
+                                    previous_model.optimizer = optim.SGD(previous_model.optim_list)
+                                check_point = torch.load(filename)
+                                previous_model.load_state_dict(check_point['model_state_dict'])
+                                previous_model.optimizer.load_state_dict(check_point['optimizer_state_dict'])
+                            
+
+
                     else:
                         if task >= 2:
                             ade_previous = 0
@@ -426,7 +460,6 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         is_best = ade_val < best_ade     # best 每个task结束 reset 一次200. 所以依然会在进行新task时得到最好的model
                         best_ade = min(ade_val, best_ade)
                         if is_best:
-                            previous_model = copy.deepcopy(model)
                             #file_dir = os.path.dirname(__file__) + "/chekpoint"
                             file_dir = os.path.join(os.path.dirname(__file__), "checkpoint")
                             if os.path.exists(file_dir) is False:
@@ -438,7 +471,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                         seed=args.seed, epoch=epoch,
                                                         val=args.val, val_class=args.val_class,
                                                         si=args.si, si_c=args.si_c))
-                            torch.save(model.state_dict(), filename)
+                            checkpoint={'model_state_dict': model.state_dict(),
+                                 'optimizer_state_dict': model.optimizer.state_dict()}
+                            torch.save(checkpoint, filename)
                             shutil.copyfile(filename,
                                             "{method}_{replay}_{task}_model_{order}_{batch_size}_{seed}_{val}_{val_class}_{si}_{si_c}.path".format(
                                                 method=args.method, replay=args.replay, task=task,
@@ -446,6 +481,31 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                                                 seed=args.seed,
                                                 val=args.val, val_class=args.val_class,
                                                 si=args.si, si_c=args.si_c))
+                            if args.feedback == True:
+                                previous_model = copy.deepcopy(model)
+                            else:
+                                 # when use origianl SGR, problem comes out, bug say model have generator ,cannot pickle,cannot deepcopy
+                                from main_model.encoder import Predictor
+                                previous_model = Predictor(
+                                                        obs_len=args.obs_len,
+                                                        pred_len=args.pred_len,
+                                                        traj_lstm_input_size=args.traj_lstm_input_size,
+                                                        traj_lstm_hidden_size=args.traj_lstm_hidden_size,
+                                                        traj_lstm_output_size=args.traj_lstm_output_size
+                                                    ).to(device)
+                                previous_model.optim_type = args.optimizer
+                                previous_model.optim_list = [
+                                {'params': filter(lambda p: p.requires_grad, previous_model.parameters()), 'lr': args.lr},
+                                ]
+                                
+                                if previous_model.optim_type in ("adam", "adam_reset"):
+                                    previous_model.optimizer = optim.Adam(previous_model.optim_list, lr=args.lr)
+                                elif previous_model.optim_type == "sgd":
+                                    previous_model.optimizer = optim.SGD(previous_model.optim_list)
+                                check_point = torch.load(filename)
+                                previous_model.load_state_dict(check_point['model_state_dict'])
+                                previous_model.optimizer.load_state_dict(check_point['optimizer_state_dict'])
+
                 if args.val_class == 'replay':
                     if generator is None:
                         val_dataset = data_loader(args, val_datasets[task - 1], args.batch_size)
@@ -567,8 +627,9 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
 
         # ----> UPON FINISHING EACH TASK...
         # draw after a task finish all epoch
-        from BI_utils import visualize
-        visualize.visualize_loss_epoches(losses_dict_main_epoch,task) # every task, 2 images, each have 4 subplots.
+        if args.feedback == True:
+            from BI_utils import visualize
+            visualize.visualize_loss_epoches(losses_dict_main_epoch,task) # every task, 2 images, each have 4 subplots.
 
         # Close progress-bar(s)
         progress.close()
@@ -597,7 +658,6 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
             Generative = True
             #previous_generator = copy.deepcopy(generator).eval() if generator is not None else previous_model
             previous_generator = previous_model if args.feedback else copy.deepcopy(generator).eval()  # RTF mode, we use combined model to sample and get output. #YZ
-            
         # EXEMPLARS: update exemplar sets
         if replay_model == "exemplars":
             # based on this dataset, construct new exemplar-set for this class

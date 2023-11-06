@@ -183,8 +183,8 @@ class Model_RTF(Replayer):
             # -fully connected hidden layers
             self.fcD = fc_layer(128, traj_lstm_hidden_size, batch_norm=None)
         else:
-            self.fromZ = fc_layer_fixed_gates(z_dim, 128, batch_norm=None,gating_prob=gate_prob, gate_size=tasks)
-            self.fcD = fc_layer_fixed_gates(128, traj_lstm_hidden_size, batch_norm=None,gating_prob=gate_prob, gate_size=tasks)
+            self.fromZ = fc_layer_fixed_gates(z_dim, 128, batch_norm=None,gating_prob=self.gate_prob, gate_size=self.tasks)
+            self.fcD = fc_layer_fixed_gates(128, traj_lstm_hidden_size, batch_norm=None,gating_prob=self.gate_prob, gate_size=self.tasks)
 
         # -pooling   #todo
         self.pool_net = PoolHiddenNet(

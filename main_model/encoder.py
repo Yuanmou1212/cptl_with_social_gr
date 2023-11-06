@@ -117,7 +117,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
 
         return outputs
 
-    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_rel_=None, y_rel_=None, seq_start_end_=None, loss_mask=None, active_classes=None, rnt=0.5):
+    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, loss_mask=None, active_classes=None, rnt=0.5,U_info=None,obs_traj_record=None,task=None,tasks_=None):
         '''
         Train model for one batch ([x],[y]), possibly supplemented with replayed data ([x_], [y_]).
 
@@ -136,11 +136,11 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
 
         #--(1)-- REPLAYED DATA---#
 
-        if x_rel_ is not None:  # train a batch 指的是对 当前训练数据是一个batch，但replay的数据是多少个batch，得看执行replay过程中的sample函数得到的结果/eg：多个previous task的一个batch，就是多个batch了
+        if x_ is not None:  # train a batch 指的是对 当前训练数据是一个batch，但replay的数据是多少个batch，得看执行replay过程中的sample函数得到的结果/eg：多个previous task的一个batch，就是多个batch了
             ##YZ # 加了两行判断/ 来自BI vae 对应部分。
-            TaskIL = type(y_rel_)==list
+            TaskIL = type(y_)==list
             if not TaskIL:
-                y_ = [y_rel_] # [tensor([[[]]])] 本来函数就是train a batch。 然而， 在vae_models.py train a batch 中，明显有区别. 那边debug 得到n-replay =12.
+                y_ = [y_] # [tensor([[[]]])] 本来函数就是train a batch。 然而， 在vae_models.py train a batch 中，明显有区别. 那边debug 得到n-replay =12.
             
             n_replays = len(y_) if (y_ is not None) else None     # 我先理解成 list里面有很多个tensor（每个tensor是一个batch的数据），n代表有多数个tensor
 
@@ -150,7 +150,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
             distill_r = [None]*n_replays
 
             # Loop to evaluate predictions on replay according to each previous task
-            y_hat_all = self(x_rel_, seq_start_end_)  # self means current instance. this way it == self.foward() function, will get predict results.
+            y_hat_all = self(x_, seq_start_end_)  # self means current instance. this way it == self.foward() function, will get predict results.
 
             for replay_id in range(n_replays):
                 # -if needed (e.g., Task-IL or Class-IL scenario), remove predictions for classed not in replayed task
@@ -158,7 +158,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
                 y_hat = y_hat_all   # 预测值 pred
 
                 # Calculate losses
-                if (y_rel_ is not None) and (y_[replay_id] is not None):
+                if (y_ is not None) and (y_[replay_id] is not None):
                     # pred_traj_r[replay_id] = F.cross_entropy(y_hat.permute(1,0,2), y_[replay_id].permute(1,0,2), reduction='mean')
                     pred_traj_r[replay_id] = l2_loss(y_hat, y_[replay_id], mode="average")
 
@@ -166,7 +166,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
                 loss_replay[replay_id] = pred_traj_r[replay_id]
 
         # Calculate total replay loss
-        loss_replay = None if (x_rel_ is None) else sum(loss_replay) / n_replays
+        loss_replay = None if (x_ is None) else sum(loss_replay) / n_replays
 
         #--(2)-- CURRENT DATA --#
 
@@ -184,7 +184,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
             loss_cur = pred_traj
 
         # Combine loss from current and replayed batch
-        if x_rel_ is None:
+        if x_ is None:
             loss_total = loss_cur
         else:
             loss_total = loss_replay if (x_rel is None) else rnt*loss_cur+(1-rnt)*loss_replay  # rnt就是 replay 与current loss 占比权重。
@@ -208,7 +208,7 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
             'loss_current':loss_cur.item() if x_rel is not None else 0,
             'loss_replay': loss_replay.item() if (loss_replay is not None) and (x_rel is not None) else 0,
             'pred_traj': pred_traj.item() if pred_traj is not None else 0,
-            'pred_traj_r': sum(pred_traj_r).item()/n_replays if (x_rel_ is not None and pred_traj_r[0] is not None) else 0,
+            'pred_traj_r': sum(pred_traj_r).item()/n_replays if (x_ is not None and pred_traj_r[0] is not None) else 0,
             'si_loss': surrogate_loss.item(),
         }
 

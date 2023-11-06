@@ -430,9 +430,14 @@ def run(args, verbose=False):                                   #verbose 输入�
                 # lstm
                 if args.replay_model == 'lstm': # generate observed part.
                     from generative_model.vae_models import AutoEncoder
-                    generator = AutoEncoder(obs_len=args.obs_len, pred_len=args.pred_len, traj_lstm_input_size=args.traj_lstm_input_size,
-                                            traj_lstm_hidden_size=args.traj_lstm_hidden_size, traj_lstm_output_size=args.traj_lstm_output_size,
-                                            z_dim=args.z_dim).to(device)
+                    generator = AutoEncoder(obs_len=args.obs_len, pred_len=args.pred_len, 
+                                            traj_lstm_input_size=args.traj_lstm_input_size,
+                                            traj_lstm_hidden_size=args.traj_lstm_hidden_size, 
+                                            traj_lstm_output_size=args.traj_lstm_output_size,
+                                            z_dim=args.z_dim,
+                                            gate_decoder=args.gate_decoder,
+                                            gate_prob=args.gate_prob,
+                                            tasks= tasks).to(device)
                 # condition
                 if args.replay_model == 'condition':  # generate only future part.
                     from generative_model.vae_models import AutoEncoder
@@ -552,44 +557,31 @@ def run(args, verbose=False):                                   #verbose 输入�
         #----------------#
         #----TRAINING----#
         #----------------#
+        if verbose:
+            print("\nTraining...")
+        # Keep track of training-time
+        start = time.time()
+        # Train model
+        train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model=args.replay, iters=args.iters, batch_size=args.batch_size,
+                generator=generator, fake_generator=fake_generator, gen_iters=args.g_iters, gen_loss_cbs=generator_loss_cbs, fake_gen_loss_cbs=fake_generator_loss_cbs,
+                sample_cbs=sample_cbs, eval_cbs=eval_cbs, loss_cbs=solver_loss_cbs, val_loss_cbs=solver_val_loss_cbs,
+                metric_cbs=metric_cbs)
+        
+        # # save model and generator/ don't need this, in train, it saved best model already.in checkpoint, and best in current dir
+        # save_dir = "model_params"
+        # if not os.path.exists(save_dir):
+        #     os.makedirs(save_dir)
+        # model_path = os.path.join(save_dir, f"model_after_task{args.num_task}.pth")
+        # torch.save(model.state_dict(), model_path)
+        # generator_path = os.path.join(save_dir, f"generator_after_task{args.num_task}.pth")
+        # torch.save(generator.state_dict(), generator_path)
 
-        # 加一个 train or load的选项
-        if args.loadpth:
-            model_path = f'model_params/model_after_task{args.num_task}.pth'  # 模型的文件路径
-            generator_path = f'model_params/generator_after_task{args.num_task}.pth'  # 生成器的文件路径
-            # 加载模型
-            model = torch.load(model_path)
-            model.eval()  # 如果你只想进行推理而不是训练，可以调用eval()方法
-            # 加载生成器
-            generator = torch.load(generator_path)
-            generator.eval()  # 同样，如果你只想进行推理，可以调用eval()方法
-
-        else: # train
-            if verbose:
-                print("\nTraining...")
-            # Keep track of training-time
-            start = time.time()
-            # Train model
-            train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model=args.replay, iters=args.iters, batch_size=args.batch_size,
-                    generator=generator, fake_generator=fake_generator, gen_iters=args.g_iters, gen_loss_cbs=generator_loss_cbs, fake_gen_loss_cbs=fake_generator_loss_cbs,
-                    sample_cbs=sample_cbs, eval_cbs=eval_cbs, loss_cbs=solver_loss_cbs, val_loss_cbs=solver_val_loss_cbs,
-                    metric_cbs=metric_cbs)
-            
-            # # save model and generator/ don't need this, in train, it saved best model already.in checkpoint, and best in current dir
-            # save_dir = "model_params"
-            # if not os.path.exists(save_dir):
-            #     os.makedirs(save_dir)
-            # model_path = os.path.join(save_dir, f"model_after_task{args.num_task}.pth")
-            # torch.save(model.state_dict(), model_path)
-            # generator_path = os.path.join(save_dir, f"generator_after_task{args.num_task}.pth")
-            # torch.save(generator.state_dict(), generator_path)
-
-            # Get total training-time in seconds, and write to file
-            if args.time:
-                training_time = time.time() - start
-                time_file = open("{}/time-{}.txt".format(args.r_dir, param_stamp), 'w')
-                time_file.write('{}\n'.format(training_time))
-                time_file.close()
+        # Get total training-time in seconds, and write to file
+        if args.time:
+            training_time = time.time() - start
+            time_file = open("{}/time-{}.txt".format(args.r_dir, param_stamp), 'w')
+            time_file.write('{}\n'.format(training_time))
+            time_file.close()
 
         #------------------------------------------------------------------------------------------------------------------#
         #------------------#

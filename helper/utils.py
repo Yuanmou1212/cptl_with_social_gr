@@ -277,7 +277,7 @@ def validate_cl(args, model, val_loader, epoch, writer=None):
             if args.feedback == True:
                 pred_traj_fake_rel = model.infer(obs_traj_rel, seq_start_end)
             else:
-                pred_traj_fake_rel = model.infer(obs_traj_rel, seq_start_end)
+                pred_traj_fake_rel = model(obs_traj_rel, seq_start_end)
 
             pred_traj_fake_rel_predpart = pred_traj_fake_rel[-args.pred_len :]
             pred_traj_fake = relative_to_abs(pred_traj_fake_rel_predpart, obs_traj[-1])
@@ -308,7 +308,7 @@ def validate_cl_replay(args, model, x_rel_val, y_rel_val, seq_start_end_val):
         if args.feedback ==True:
             pred_traj_fake_rel = model.infer(x_rel_val, seq_start_end_val)
         else:
-            pred_traj_fake_rel = model.infer(x_rel_val, seq_start_end_val)
+            pred_traj_fake_rel = model(x_rel_val, seq_start_end_val)
         pred_traj_fake_rel_predpart = pred_traj_fake_rel[-args.pred_len:]
         pred_traj_fake = relative_to_abs(pred_traj_fake_rel_predpart, x_rel_val[-1])
         ade_, _ = cal_ade_fde(y_rel_val, pred_traj_fake)
@@ -364,7 +364,7 @@ def validate(args, model, val_loader, epoch, writer=None):
             if args.feedback ==True:
                 pred_traj_fake_rel = model.infer(obs_traj_rel, seq_start_end)
             else:
-                pred_traj_fake_rel = model.infer(obs_traj_rel, seq_start_end)
+                pred_traj_fake_rel = model(obs_traj_rel, seq_start_end)
 
             pred_traj_fake_rel_predpart = pred_traj_fake_rel[-args.pred_len :]
             pred_traj_fake = relative_to_abs(pred_traj_fake_rel_predpart, obs_traj[-1])  # 预测不同时间落在的不同绝对坐标
