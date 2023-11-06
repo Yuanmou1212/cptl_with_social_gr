@@ -18,8 +18,8 @@
 from helper.replayer import Replayer
 import torch
 import torch.nn as nn
-from generative_model.linear_nets import fc_layer,fc_layer_split
-
+from generative_model.linear_nets import fc_layer,fc_layer_split,fc_layer_fixed_gates
+import numpy as np
 from helper.utils import relative_to_abs
 
 
@@ -120,13 +120,16 @@ class Model_RTF(Replayer):
             traj_lstm_hidden_size=124,
             traj_lstm_output_size=2,
             hidden=False,
+            gate_decoder=False,
+            gate_prob=0.,
             dropout=0,
             z_dim=200,
             embedding_dim=32,
             mlp_dim=256,
             bottleneck_dim=32,
             activation='relu',
-            batch_norm=True
+            batch_norm=True,
+            tasks=4
     ):
         # Set configurations
         super().__init__()
@@ -155,8 +158,9 @@ class Model_RTF(Replayer):
 
         # BI-methods configurations
         self.hidden = hidden # internal replay
-       
-
+        self.gate_decoder = gate_decoder
+        self.gate_prob = gate_prob
+        self.tasks = tasks
 
         ###---------SPECIFY MODEL--------###
 
@@ -173,10 +177,15 @@ class Model_RTF(Replayer):
 
 
         ##>---Decoder (=p[x|z])---<##
-        # -from z
-        self.fromZ = fc_layer(z_dim, 128, batch_norm=None)
-        # -fully connected hidden layers
-        self.fcD = fc_layer(128, traj_lstm_hidden_size, batch_norm=None)
+        if self.gate_decoder!=True:     # YZ if decoder is gated or not.
+            # -from z
+            self.fromZ = fc_layer(z_dim, 128, batch_norm=None)
+            # -fully connected hidden layers
+            self.fcD = fc_layer(128, traj_lstm_hidden_size, batch_norm=None)
+        else:
+            self.fromZ = fc_layer_fixed_gates(z_dim, 128, batch_norm=None,gating_prob=gate_prob, gate_size=tasks)
+            self.fcD = fc_layer_fixed_gates(128, traj_lstm_hidden_size, batch_norm=None,gating_prob=gate_prob, gate_size=tasks)
+
         # -pooling   #todo
         self.pool_net = PoolHiddenNet(
             embedding_dim=self.embedding_dim,
@@ -254,9 +263,15 @@ class Model_RTF(Replayer):
         eps = std.new(std.size()).normal_()      # .normal_() GPT 说是单维度的。
         return eps.mul(std).add_(mu)
 
-    def decode(self, z, seq_start_end, obs_traj_pos=None): # decode 中的 最后一个LSTM 替换成identity， 然后 写个跳过中途的VAE的 encode # YZ 
-        hD = self.fromZ(z)   # 从z中展开，是个MLP
-        hidden_features = self.fcD(hD)  # embedding 得到相同的特征维度。
+    def decode(self, z, seq_start_end, obs_traj_pos=None,gate_input=None): # decode 中的 最后一个LSTM 替换成identity， 然后 写个跳过中途的VAE的 encode # YZ 
+        if self.gate_decoder==True and gate_input is not None:
+            from BI_utils.process import to_one_hot
+            gate_input = to_one_hot(gate_input,gate_size=self.tasks,device='cuda')  # from 1D array to onehot array which is needed in those FC layers.
+            hD = self.fromZ(z,gate_input=gate_input)   # 从z中展开，是个MLP
+            hidden_features = self.fcD(hD,gate_input=gate_input)  # embedding 得到相同的特征维度。
+        else:
+            hD = self.fromZ(z)   
+            hidden_features = self.fcD(hD)  
         pred_lstm_h_t = hidden_features
         pred_lstm_c_t = torch.zeros_like(pred_lstm_h_t).cuda()
         pred_traj_pos = []
@@ -275,113 +290,7 @@ class Model_RTF(Replayer):
         return outputs,decode_h
 
 
-
-    # Pass latent variable activations through feedback connections, to generator reconstructed image
-    # def decode(self, z):
-    #     hD = self.fromZ(z)
-
-    # def predict(self,input,not_hidden=True,U_info=None):
-    #     # input can be x if not_hidden = True,  input can be hidden if not_hidden= false
-    
-    #     if  not_hidden==True: # input is obs_traj_pos, from X
-    #         batch = input.shape[1]
-    #         traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
-    #         pred_traj_pos = []
-    #         traj_lstm_hidden_states = []
-
-    #         for i, input_t in enumerate(
-    #             input[: self.obs_len].chunk(   ## ：Doc shows chunk() input should be chunks rather than size of one chunk. chunks=size0 of input, so we have same number(dim0 of input) of chunks 
-    #                 input[: self.obs_len].size(0), dim=0  # 就是把单个时间步的tensor[1,...]给提了出来（input_t)用来循环。 其实取切片也可以做到
-    #             )      # (1，batch, input_size)
-    #         ):
-    #             #print(input_t.shape)   # input shape ([1, 64, 2]) 后面的batch出现过 epoch([1, 72, 2]) torch.Size([1, 107, 2]) torch.Size([1, 143, 2]) 等等  （time，batch （ped），position ）
-    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
-    #                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)  # dim 0 of input_t is 1, use squeeze to remove this dim  # 初始化的值都是二维的 squeeze掉的只能是时间，按照LSTM 的输入要求来看。留下的是【batch，input_size】 
-    #             )
-    #             traj_lstm_hidden_states += [traj_lstm_h_t]  # same like .append()
-    #         final_encoder_h  = traj_lstm_hidden_states[-1]
-    #         pred_lstm_h_t = final_encoder_h
-    #         pred_lstm_c_t=torch.zeros_like(final_encoder_h).cuda()
-    #         end_pos = input[-1, :, :]
-
-    #         for i in range(self.pred_len):
-    #             pred_lstm_h_t,pred_lstm_c_t = self.pred_lstm_model(
-    #                 end_pos,(pred_lstm_h_t,pred_lstm_c_t)
-    #             )
-    #             output = self.pred_hidden2pos(pred_lstm_h_t)
-    #             pred_traj_pos += [output]
-    #         traj_pred = torch.stack(pred_traj_pos)
-    #         return traj_pred
-        
-    #     else: # input from hidden, after encoder lstm.(actually from replay)
-    #         end_pos,_= U_info
-    #         final_encoder_h = input
-    #         pred_traj_pos =[]
-    #         pred_lstm_c_t=torch.zeros_like(final_encoder_h).cuda()
-    #         pred_lstm_h_t = final_encoder_h
-
-    #         for i in range(self.pred_len):
-    #             pred_lstm_h_t,pred_lstm_c_t = self.pred_lstm_model(
-    #                 end_pos,(pred_lstm_h_t,pred_lstm_c_t)
-    #             )
-    #             output = self.pred_hidden2pos(pred_lstm_h_t)
-    #             pred_traj_pos += [output]
-    #         traj_pred = torch.stack(pred_traj_pos)
-    #         return traj_pred
-
-
-    # def forward(self, obs_traj_pos, seq_start_end,full=False,input_not_hidden=True,U_info=None):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
-    #     ## if full==false, only predict! full==true, go through Social GR.
-    #     if full==True:
-    #         batch = obs_traj_pos.shape[1] #todo define the batch
-    #         traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
-    #         # traj_lstm_h_t_2, traj_lstm_c_t_2 =self.init_obs_traj_lstm(batch)
-    #         # pred_lstm_h_t, pred_lstm_c_t = self.init_pred_traj_lstm(batch)
-    #         traj_lstm_hidden_states = []
-    #         traj_lstm_hidden_states_2 = []
-    #         pred_lstm_hidden_states = []
-
-    #         # Encoder1, calculate the past traj hidden states, similar with embedding
-    #         for i, input_t in enumerate(
-    #             obs_traj_pos[: self.obs_len].chunk(
-    #                 obs_traj_pos[: self.obs_len].size(0), dim=0
-    #             )  # （1，batch，input_size） 每个时间步逐步输入LSTM
-    #         ):
-    #             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
-    #                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
-    #             )  # （batch，input_size）  # shared encode part #YZ
-    #             traj_lstm_hidden_states += [traj_lstm_h_t]
-
-            
-    #         # encode (forward), reparameterize and decode (backward)
-    #         final_encoder_h  = traj_lstm_hidden_states[-1]
-    #         # social pooling (Reference:https://github.com/agrimgupta92/sgan)
-    #         end_pos = obs_traj_pos[-1, :, :]       # 最后一个可观测时间步的所有batch的位置信息。 接下来就要拆开batch得到多个scene进入 pool 了，之前LSTM 只考虑了每个行人的轨迹。batch/ped id不同的都不会互相影响 
-            
-    #         ## Generator part
-            
-    #         pool_h = self.pool_net(final_encoder_h, seq_start_end, end_pos)    # 压缩的信息意义是： 行人a考虑其他人对a的距离 以及 其他人对应的hidden state（历史轨迹行为） 后，经过MLP (考虑)，最被激活的代表 最需要考虑的特征。（可能反应的是b在身边很近但同方向，c从对面来很快且靠近...）
-    #         # Construct input hidden states for decoder
-    #         vae_input = torch.cat([final_encoder_h, pool_h], dim=1)            # 由于pool 考虑的是和他人的信息，忘记了自己的路径（类似忘记了自己的目的地和所在地），所以要cat
-    #         # vae_input = final_encoder_h
-    #         mu, logvar, hE = self.encode(vae_input)       # VAE encode
-    #         z = self.reparameterize(mu, logvar)   # 自带sample
-    #         #traj_recon = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos) 
-    #         # implement internal replay. if hidden=true, output = hidden state before LSTm, else, output= outputs position
-    #         traj_recon,decode_h = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos)          
-    #         return (traj_recon,mu,logvar,z,decode_h) #(traj_recon, mu, logvar, z) 
-        
-    #     ## Predict part
-    #     else: # only run main model= predict part.
-
-    #         if input_not_hidden == True:
-    #             traj_pred = self.predict(obs_traj_pos,not_hidden=True,U_info=U_info) # 只进行最初的main_model！ default is True and none
-    #         else:
-    #             traj_pred = self.predict(obs_traj_pos,not_hidden=False,U_info=U_info)
-    #         return traj_pred
-
-
-    def forward(self,obs_traj_pos, seq_start_end,input_not_hidden=True,U_info=None,obs_traj_record=None):  # 精简版，一代二，同时输出x_recon 和 y_pred
+    def forward(self,obs_traj_pos, seq_start_end,input_not_hidden=True,U_info=None,obs_traj_record=None,gate_input=None):  # 精简版，一代二，同时输出x_recon 和 y_pred
             if input_not_hidden == True: # input is x.  
                 batch = obs_traj_pos.shape[1] #todo define the batch
                 traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
@@ -419,9 +328,10 @@ class Model_RTF(Replayer):
             # vae_input = final_encoder_h
             mu, logvar, hE = self.encode(vae_input)       # VAE encode
             z = self.reparameterize(mu, logvar)   # 自带sample
+
             #traj_recon = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos) 
             # implement internal replay. if hidden=true, output = hidden state before LSTm, else, output= outputs position
-            traj_recon,decode_h = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos)          
+            traj_recon,decode_h = self.decode(z, seq_start_end, obs_traj_pos=obs_traj_pos,gate_input=gate_input)          
             
             # Predict Part (main model)
             pred_lstm_c_t=torch.zeros_like(final_encoder_h).cuda()
@@ -437,8 +347,43 @@ class Model_RTF(Replayer):
 
             return (traj_pred,traj_recon,mu,logvar,z,decode_h) #(traj_recon, mu, logvar, z) 
         
+    def infer(self,obs_traj_pos, seq_start_end):  # inference, only go through main part for predicting/infering
+        # input is x.  for inference, always input x rather than internal. only traninig and replay use hidden, if use internal replay method
+        batch = obs_traj_pos.shape[1] #todo define the batch
+        traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
+        # traj_lstm_h_t_2, traj_lstm_c_t_2 =self.init_obs_traj_lstm(batch)
+        # pred_lstm_h_t, pred_lstm_c_t = self.init_pred_traj_lstm(batch)
+        traj_lstm_hidden_states = []
+        traj_lstm_hidden_states_2 = []
+        pred_lstm_hidden_states = []
 
+        # Encoder1, calculate the past traj hidden states, similar with embedding
+        for i, input_t in enumerate(
+            obs_traj_pos[: self.obs_len].chunk(
+                obs_traj_pos[: self.obs_len].size(0), dim=0
+            )  # （1，batch，input_size） 每个时间步逐步输入LSTM
+        ):
+            traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
+                input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
+            )  # （batch，input_size）  # shared encode part #YZ
+            traj_lstm_hidden_states += [traj_lstm_h_t]
 
+        # encode (forward), reparameterize and decode (backward)
+        final_encoder_h  = traj_lstm_hidden_states[-1]
+        # social pooling (Reference:https://github.com/agrimgupta92/sgan)
+        end_pos = obs_traj_pos[-1, :, :]       # 最后一个可观测时间步的所有batch的位置信息。 接下来就要拆开batch得到多个scene进入 pool 了，之前LSTM 只考虑了每个行人的轨迹。batch/ped id不同的都不会互相影响 
+    
+        pred_lstm_c_t=torch.zeros_like(final_encoder_h).cuda()
+        pred_lstm_h_t = final_encoder_h
+        pred_traj_pos =[]
+        for i in range(self.pred_len):
+            pred_lstm_h_t,pred_lstm_c_t = self.pred_lstm_model(
+                end_pos,(pred_lstm_h_t,pred_lstm_c_t)
+            )
+            output = self.pred_hidden2pos(pred_lstm_h_t)
+            pred_traj_pos += [output]
+        traj_pred = torch.stack(pred_traj_pos)
+        return traj_pred
 
 
     ##------  Suppliment function -------##
@@ -456,7 +401,7 @@ class Model_RTF(Replayer):
 
     ##------- SAMPLE FUNCTIONS -------##
     ## 需要sample既能replay batch data，又能replay batch hidden state+ U info (end_pos，seq_start_end)
-    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end): # 所谓的replay_seq_start_end 就是用新的task的dataset取的数据格式，来创建replay数据！ 即additional info中的number
+    def sample(self, obs_traj_rel, obs_traj, replay_seq_start_end,task_id_cur): # 所谓的replay_seq_start_end 就是用新的task的dataset取的数据格式，来创建replay数据！ 即additional info中的number
         '''Generate [size] samples from the model. Output is tensor (not "requiring grad"), on same device as <self>'''
 
         # set model to eval()-mode
@@ -469,13 +414,20 @@ class Model_RTF(Replayer):
         # sample z 
         z = torch.randn(size, self.z_dim).to(self._device())  # if修改成多维高斯，这里采样可能也要变？
         
+        # tasks_
+        if self.gate_decoder == True:
+            freq = [1/(task_id_cur-1) for i in range(1,task_id_cur)]  # same probability to replay previous job.
+            tasks_=np.random.choice(list(range(1,task_id_cur)),size=size,p=freq)
+        else:
+            tasks_=None
+
         if self.hidden == False:
             # decode z into traj x
             with torch.no_grad():
-                traj_rel,_ = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel)
+                traj_rel,_ = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel,gate_input=tasks_)
             # relative to absolute
             traj = relative_to_abs(traj_rel, obs_traj[0]) # obs_traj 即 additional info中的 intial position 
-            replay_traj = [traj, traj_rel, replay_seq_start_end]    
+            replay_traj = [traj, traj_rel, replay_seq_start_end,tasks_]    
             # returen samples as [batch_size]x[traj_size] tensor
             # set model back to its initial mode
             self.train(mode=mode)
@@ -483,10 +435,10 @@ class Model_RTF(Replayer):
         else:
             # decode z into hidden state
             with torch.no_grad():
-                _,decode_h = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel)
+                _,decode_h = self.decode(z, replay_seq_start_end, obs_traj_pos=obs_traj_rel,gate_input=tasks_)
             
             end_pos = obs_traj[-1]
-            U_info = (end_pos,replay_seq_start_end)
+            U_info = (end_pos,replay_seq_start_end,tasks_)
                 # 所以调用时，少了个参数，得对应
             return decode_h,U_info
     
@@ -580,7 +532,7 @@ class Model_RTF(Replayer):
     ##------- TRAINING FUNCTIONS -------##
     # sample后得到 应该得到一个hidden，送进SGR 即forward full 中，得到 hidden_recon， 这俩直接求loss，来训练SGR part/ SGR 的训练在哪儿？
     # 这里是copy的 vae的train a batch。应该看看main的train a batch
-    def train_a_batch(self, x_rel, y_rel, seq_start_end, U_info=None,x_=None, y_=None, seq_start_end_=None, rnt=0.5,obs_traj_record=None,loss_mask=None): # more input U_info
+    def train_a_batch(self, x_rel, y_rel, seq_start_end, U_info=None,x_=None, y_=None, seq_start_end_=None, rnt=0.5,obs_traj_record=None,loss_mask=None,task=1,tasks_=None): # more input U_info
         '''Train model for one batch ([x],[y]),possibly supplemented with replayed data ([x_],[y_])
 
         [x]          <tensor> batch of past trajectory (could be None, in which case only 'replayed' data is used)
@@ -590,6 +542,8 @@ class Model_RTF(Replayer):
         [rnt]        <number> in [0,1], relative importance of new task
         [U_info]       (end_pos,replay_seq_start_end )
         obs_traj_record    obs_traj for current dataset, is called for replay, decode get start position through it.
+        [task]  <number> indiciate which task are we training now. (start from 1 )
+        [tasks_]  <tensor> 1D, a batcch replay data belongs to what task
         '''
 
         # Set model to training-mode
@@ -605,13 +559,16 @@ class Model_RTF(Replayer):
         precision = 0.
         if x_rel is not None:  # train main model. YZ
 
-            ## Run the model 
-            y_hat_rel,recon_traj, mu, logvar, z,decode_h = self.forward(x_rel, seq_start_end)  ## YZ  default input_not_hidden=True input is current data(must be x),run trhough forward function, get 2 pathes result.
+            # If using task gating method, create task_tensor, used for decoder.
+            task_tensor = None
+            if self.gate_decoder == True: # x_rel is [obs,batch,postion] so use 1 to get batch dim
+                task_tensor = torch.tensor(np.repeat(task,x_rel.size(1))).to(self._device())  # tensor [batch_size,]     each element means which task a single element(element in a batch) belongs to . eg belongs to task1 number is 1
+            gate_input = task_tensor if self.gate_decoder else None
+
+            ## Run the model  
+            y_hat_rel,recon_traj, mu, logvar, z,decode_h = self.forward(x_rel, seq_start_end,gate_input=gate_input)  ## YZ  default input_not_hidden=True input is current data(must be x),run trhough forward function, get 2 pathes result.
+            #  Only use gate_decoder as Flag, once it is true, layer need gate_input and gate_input is always not None, when flag is false, then gate_input is not called in the fc layers, so have no influence.
             
-            
-            # If needed (e.g., Task-IL or Class-IL scenario), remove predictions for classes not in current task
-            # if active_classes is not None:
-            #     pass              #
 
             ## internal replay or not
             # x go through encoder lstm get x_h
@@ -661,17 +618,22 @@ class Model_RTF(Replayer):
             variatL_r = [None]*n_replays
             predL_r = [None]*n_replays
             pred_traj_r = [None]*n_replays
-
+            
+            if self.gate_decoder == True:
+                gate_input = tasks_
+            else:
+                gate_input = None
+            
             # Run model (if [x_] is not a list with separate replay per task)
             if (not type(x_)==list):
                 x_temp_ = x_  # when internal replay, x_ is hidden state.
                 #recon_batch, mu, logvar, z = self.forward(x_temp_, seq_start_end_)
                 if self.hidden == True:
-                    pred_y,recon_traj,mu,logvar,z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,input_not_hidden=False,obs_traj_record=obs_traj_record,U_info=U_info)
+                    pred_y,recon_traj,mu,logvar,z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,input_not_hidden=False,obs_traj_record=obs_traj_record,U_info=U_info,gate_input=gate_input)
                     recon=recon_hidden.unsqueeze(0) # is hidden # 不确定是不是这么改！！ replay'data似乎没有原始路径。即输入的data是x的情况。
                     x_temp_ = x_temp_.unsqueeze(0) # is hidden
                 else: # x_temp_  is original input 
-                    pred_y,recon_traj, mu, logvar, z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_) # default is input_not_hidden=True
+                    pred_y,recon_traj, mu, logvar, z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,gate_input=gate_input) # default is input_not_hidden=True
                     recon = recon_traj # is x
             # Loop to perform each replay
             for replay_id in range(n_replays):
@@ -680,12 +642,12 @@ class Model_RTF(Replayer):
                 if (type(x_)==list): # debug test, will not go into this.
                     x_temp_ = x_[replay_id]
                     if self.hidden == True:
-                        pred_y,recon_traj,mu,logvar,z,recon_hidden = self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,input_not_hidden=False,obs_traj_record=obs_traj_record,U_info=U_info)
+                        pred_y,recon_traj,mu,logvar,z,recon_hidden = self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,input_not_hidden=False,obs_traj_record=obs_traj_record,U_info=U_info,gate_input=gate_input)
                         # note: recon_traj seq is 8 , pred_traj seq is 12, different!
                         recon=recon_hidden.unsqueeze(0)  
                         x_temp_ = x_temp_.unsqueeze(0)
                     else:
-                        pred_y,recon_traj, mu, logvar, z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_) # ,input_not_hidden=True
+                        pred_y,recon_traj, mu, logvar, z,recon_hidden=self.forward(obs_traj_pos=x_temp_,seq_start_end=seq_start_end_,gate_input=gate_input) # ,input_not_hidden=True
                         recon = recon_traj # is x
                 # Calculate generator losses
                 reconL_r[replay_id], variatL_r[replay_id] = self.loss_function(

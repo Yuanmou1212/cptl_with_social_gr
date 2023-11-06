@@ -76,6 +76,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
     memory_batch = []
     U_info=None  # for first task. No replay,only main forward.
     obs_traj_record = None 
+    tasks_ = None # record which task replayed data belongs to 
 
     # global x_rel_val, y_rel_val, seq_start_end_val
 
@@ -196,15 +197,18 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     replay_data_loader = iter(
                         data_loader(args, train_dataset, args.replay_batch_size))  # replay_batch_size=64 和 current dataset的一样   # 用的是当前数据集！
                     replay_out = next(replay_data_loader)   # 扔进来一个batch
-                    obs_traj_record=replay_out[0].to(device)
+                    obs_traj_record=replay_out[0].to(device)              
                     if args.hidden ==False:  # no hidden replay. sample as normal.
                         if args.replay_model == 'lstm':
                             # replay_traj = previous_generator.sample(x_rel, obs_traj, seq_start_end)  # previous generator就是 deepcopy的前一个generator
                             replay_traj = previous_generator.sample(replay_out[2].to(device), replay_out[0].to(device),
-                                                                    replay_out[6].to(device))
+                                                                    replay_out[6].to(device),task_id_cur=task )  # 2,3,4
                             x_rel_ = replay_traj[1]
                             x_ = replay_traj[0]  #absolute position is not used . 
                             seq_start_end_ = replay_traj[2]
+                            # gate based method
+                            tasks_=(replay_traj[3])
+
                             # new：add y_rel_   otherwise, train a batch will raise error!
                             #y_rel_ = previous_model(x_rel_, seq_start_end_)
                         if args.replay_model == 'vrnn':
@@ -219,10 +223,10 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     else: # Internal replay, sample result is hidden state.  ##YZ
                         if args.replay_model == 'lstm':
                             decode_h,U_info = previous_generator.sample(replay_out[2].to(device), replay_out[0].to(device),
-                                                                    replay_out[6].to(device))  #here previous_generator is actaully combined model's full part.
+                                                                    replay_out[6].to(device),task_id_cur=task)  #here previous_generator is actaully combined model's full part.
                             x_rel_ = decode_h
-                            _,seq_start_end_ = U_info
-                            
+                            _,seq_start_end_,tasks_ = U_info
+                        
 
                         if args.replay_model == 'vrnn':
                             pass # didn't use VRNN to test internal replay.
@@ -260,10 +264,8 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         seq_start_end_ = memory_seq[4].cuda()
                         
                     previous_model.eval()
-                    if args.hidden ==False:
-                        y_rel_,_,_,_,_,_ = previous_model(x_rel_, seq_start_end_)
-                    else: #x_rel_ here is LSTM hidden
-                        y_rel_,_,_,_,_,_ =previous_model(x_rel_, seq_start_end_ ,input_not_hidden=False,U_info=U_info,obs_traj_record=obs_traj_record)  ##YZ
+                    
+                    y_rel_ =previous_model.infer(x_rel_, seq_start_end_ )  ##YZ original main have no infer function
 
                 # Get target scores and labels (i.e., [scores_] / [y_]) -- using previous model, with no_grad()
                 # -if there are no task-specific mask, obtain all predicted scores at once
@@ -279,7 +281,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 if batch_index <= iters*batch_num:    # index是指示在这个dataset中的第多少个batch，从这里限制每个task每一个epoch训练次数不超过iters
 
                     # Train the main model with this batch     ## ?? train a model 会用 surrogate_loss（忽略） , first task 怎么解决有的参数不存在的问题？？
-                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_,U_info=U_info, loss_mask=loss_mask, rnt=1./task,obs_traj_record=obs_traj_record)  # obs_seq_list=>obs_traj
+                    loss_dict_main = model.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_,U_info=U_info, loss_mask=loss_mask, rnt=1./task,obs_traj_record=obs_traj_record,task=task,tasks_=tasks_)  # obs_seq_list=>obs_traj
                     main_loss_file = open("{}/loss_main_model_{}_{}_{}_{}.txt".format(args.r_dir, args.iters, args.batch_size, args.replay, args.val_class), 'a')   # 字符 'a' 表示以附加（append）模式打开文件
                     main_loss_file.write('{}: {}\n'.format(batch_index, loss_dict_main['loss_total']))  ## ?? 这里是在记录loss日志
                     main_loss_file.close()
@@ -316,7 +318,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                 if generator is not None and batch_index <= gen_iters*batch_num:   # 这是说明，同一次batch经过时，先train model 再train generator，有可能出现model停了，generator继续train的情况（dataloader没放完的情况）
                     # when replay through feedback, generator is None.##YZ
                     # Train the generator with this batch
-                    loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task)
+                    loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task,task=task)
                     losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
                     losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
                     losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])

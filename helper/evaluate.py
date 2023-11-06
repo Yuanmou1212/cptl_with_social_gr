@@ -119,7 +119,7 @@ def evaluate(loader, predictor,args):
 
             for _ in range(1):
                 if args.feedback==True:
-                    pred_traj_fake_rel,_,_,_,_,_ = predictor(obs_traj_rel, seq_start_end)
+                    pred_traj_fake_rel = predictor.infer(obs_traj_rel, seq_start_end)
                 else:
                     pred_traj_fake_rel = predictor(obs_traj_rel, seq_start_end)
                 pred_traj_fake = utils.relative_to_abs(pred_traj_fake_rel, obs_traj[-1]) 

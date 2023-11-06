@@ -2,7 +2,7 @@ from torch import nn
 import numpy as np
 from helper import utils
 from generative_model import excitability_modules as em
-
+import torch
 
 
 class fc_layer(nn.Module):
@@ -39,6 +39,39 @@ class fc_layer(nn.Module):
     def list_init_layers(self):
         '''Return list of modules whose parameters could be initialized differently (i.e., conv- or fc-layers).'''
         return [self.linear, self.gate] if hasattr(self, 'gate') else [self.linear]
+
+# for gating based method
+class fc_layer_fixed_gates(nn.Module):
+    def __init__(self, in_size, out_size, nl=nn.ReLU(),
+                 drop=0., bias=True, excitability=False, excit_buffer=False, batch_norm=False, gate_size=4,gating_prob=0.2,device='cuda'):  # gate_size is tasks, here CPTL is 4
+        super().__init__()
+        if drop > 0:
+            self.dropout = nn.Dropout(drop)
+        self.linear = em.LinearExcitability(in_size, out_size, bias=False if batch_norm else bias,
+                                            excitability=excitability, excit_buffer=excit_buffer)
+        if batch_norm:
+            self.bn = nn.BatchNorm1d(out_size)
+        if gate_size>0:
+            self.gate_mask = torch.tensor(np.random.choice([0.,1.],size=(gate_size,out_size),p=[gating_prob,1.-gating_prob]),dtype=torch.float,device=device) # gating_prob probability is for 0.0
+        if isinstance(nl, nn.Module):
+            self.nl = nl
+        elif not nl=="none":
+            self.nl = nn.ReLU() if nl == "relu" else (nn.LeakyReLU() if nl == "leakyrelu" else utils.Identity())
+    def forward(self,x,gate_input=None,return_pa=False): #
+        input=self.dropout(x) if hasattr(self, 'dropout') else x
+        pre_activ = self.bn(self.linear(input)) if hasattr(self, 'bn') else self.linear(input)
+        gate = torch.mm(gate_input, self.gate_mask) if hasattr(self, 'gate_mask') else None
+
+        # print("x shape {}".format(x.shape))
+        # print("pre_activ shape {}".format(pre_activ.shape))
+        # print('gate shape {}'.format(gate.shape))
+
+        if gate != None:
+            gated_pre_activ = gate * pre_activ #if hasattr(self, 'gate_mask') else pre_activ
+        else:
+            gated_pre_activ = pre_activ   # Avoid gate_input =None make * error. Only when gated method is implemented(gate_input!=none), can we use this fc layer.
+        output = self.nl(gated_pre_activ) if hasattr(self, 'nl') else gated_pre_activ
+        return (output, gated_pre_activ) if return_pa else output
 
 
 class fc_layer_split(nn.Module):

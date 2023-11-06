@@ -81,6 +81,9 @@ parser.add_argument("--gpu_index", default=0, type=int)
 ## BI method
 parser.add_argument('--feedback',action='store_true',help= 'replay through feedback methdod ')
 parser.add_argument('--hidden',action='store_true',help= 'internal replay')
+parser.add_argument('--gate_decoder',action='store_true',help="Gating based method")
+parser.add_argument('--gate_prob',default=0.1,type=float,help="Gating probability, actually in a mask, the probability of 0.")
+
 
 def get_model(checkpoint):  
     device = torch.device('cuda', index=args.gpu_index) if torch.cuda.is_available() else torch.device('cpu')
@@ -102,7 +105,10 @@ def get_model(checkpoint):
                     traj_lstm_input_size=args.traj_lstm_input_size,
                     traj_lstm_hidden_size=args.traj_lstm_hidden_size,
                     traj_lstm_output_size=args.traj_lstm_output_size,
-                    hidden= args.hidden
+                    hidden= args.hidden,
+                    gate_decoder=args.gate_decoder,
+                    gate_prob=args.gate_prob,
+                    tasks= 4
                 ).to(device)
     if args.main_model == "gat":
         n_units = (

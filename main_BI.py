@@ -133,6 +133,9 @@ BI_params.add_argument('--hidden',action='store_true',help= 'internal replay')
 BI_params.add_argument('--pre_train',action='store_true',help= 'use pre-train model')
 BI_params.add_argument('--init_weight',action="store_true",help ='initilize weight')
 BI_params.add_argument('--init_bias',action='store_true',help="initialize bias")
+BI_params.add_argument('--gate_decoder',action='store_true',help="Gating based method")
+BI_params.add_argument('--gate_prob',default=0.1,type=float,help="Gating probability, actually in a mask, the probability of 0.")
+
 
 def run(args, verbose=False):                                   #verbose 输入是true， 记得是输出详情
 
@@ -356,7 +359,10 @@ def run(args, verbose=False):                                   #verbose 输入�
                     traj_lstm_input_size=args.traj_lstm_input_size,
                     traj_lstm_hidden_size=args.traj_lstm_hidden_size,
                     traj_lstm_output_size=args.traj_lstm_output_size,
-                    hidden= args.hidden
+                    hidden= args.hidden,
+                    gate_decoder=args.gate_decoder,
+                    gate_prob=args.gate_prob,
+                    tasks= tasks
                 ).to(device) # This model include main model+ generator
                 # here add combined method. #YZ
         
