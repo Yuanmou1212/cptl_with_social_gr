@@ -199,11 +199,11 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         data_loader(args, train_dataset, args.replay_batch_size))  # replay_batch_size=64 和 current dataset的一样   # 用的是当前数据集！
                     replay_out = next(replay_data_loader)   # 扔进来一个batch
                     obs_traj_record=replay_out[0].to(device)              
-                    if args.hidden ==False:  # no hidden replay. sample as normal.
+                    if args.hidden ==False:  # no hidden replay. sample as normal. / hidden replay with SGR also use this.
                         if args.replay_model == 'lstm':
                             # replay_traj = previous_generator.sample(x_rel, obs_traj, seq_start_end)  # previous generator就是 deepcopy的前一个generator
                             replay_traj = previous_generator.sample(replay_out[2].to(device), replay_out[0].to(device),
-                                                                    replay_out[6].to(device),task_id_cur=task )  # 2,3,4
+                                                                    replay_out[6].to(device),task_id_cur=task,out_hidden_flag=False )  # 2,3,4
                             x_rel_ = replay_traj[1]
                             x_ = replay_traj[0]  #absolute position is not used . 
                             seq_start_end_ = replay_traj[2]
@@ -227,7 +227,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     else: # Internal replay, sample result is hidden state.  ##YZ
                         if args.replay_model == 'lstm':
                             decode_h,U_info = previous_generator.sample(replay_out[2].to(device), replay_out[0].to(device),
-                                                                    replay_out[6].to(device),task_id_cur=task)  #here previous_generator is actaully combined model's full part.
+                                                                    replay_out[6].to(device),task_id_cur=task,out_hidden_flag=True)  #here previous_generator is actaully combined model's full part.
                             x_rel_ = decode_h
                             _,seq_start_end_,tasks_ = U_info
                         
@@ -235,37 +235,37 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         if args.replay_model == 'vrnn':
                             pass # didn't use VRNN to test internal replay.
 
-                    if args.replay_model == "condition":    # 之前的SOTA 方法 condition generative replay
-                        # memory_seq = [obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end]
-                        # replay_traj = [traj, traj_rel, seq_start_end]
-                        if task == 2:
-                            from helper.memory_eth import memory_buff
-                            # memory_seq_dset = memory_buff(args)
-                            # memory_seq_loader = iter(data_loader(args, memory_seq_dset, args.replay_batch_size, shuffle=True))
-                            loader_eth, batch_eth = memory_buff(args)
-                            memory_seq_loader = iter(loader_eth)
-                            memory_seq = next(memory_seq_loader)
-                            memory_batch.append(batch_eth)
+                        if args.replay_model == "condition":    # 之前的SOTA 方法 condition generative replay
+                            # memory_seq = [obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end]
+                            # replay_traj = [traj, traj_rel, seq_start_end]
+                            if task == 2:
+                                from helper.memory_eth import memory_buff
+                                # memory_seq_dset = memory_buff(args)
+                                # memory_seq_loader = iter(data_loader(args, memory_seq_dset, args.replay_batch_size, shuffle=True))
+                                loader_eth, batch_eth = memory_buff(args)
+                                memory_seq_loader = iter(loader_eth)
+                                memory_seq = next(memory_seq_loader)
+                                memory_batch.append(batch_eth)
 
-                        if task == 3:
-                            from helper.memory_eth_ucy import memory_buff
-                            loader_ucy, batch_ucy = memory_buff(args, memory_batch[0])
-                            memory_seq_loader = iter(loader_ucy)
-                            memory_seq = next(memory_seq_loader)
-                            memory_batch.append(batch_ucy)
+                            if task == 3:
+                                from helper.memory_eth_ucy import memory_buff
+                                loader_ucy, batch_ucy = memory_buff(args, memory_batch[0])
+                                memory_seq_loader = iter(loader_ucy)
+                                memory_seq = next(memory_seq_loader)
+                                memory_batch.append(batch_ucy)
 
-                        if task == 4:
-                            from helper.memory_eth_ucy_ind import memory_buff
-                            loader_ind, batch_ind = memory_buff(args, memory_batch[0], memory_batch[1])
-                            memory_seq_loader = iter(loader_ind)
-                            memory_seq = next(memory_seq_loader)
-                            memory_batch.append(batch_ind)
-                            # iters_to_use = 100
+                            if task == 4:
+                                from helper.memory_eth_ucy_ind import memory_buff
+                                loader_ind, batch_ind = memory_buff(args, memory_batch[0], memory_batch[1])
+                                memory_seq_loader = iter(loader_ind)
+                                memory_seq = next(memory_seq_loader)
+                                memory_batch.append(batch_ind)
+                                # iters_to_use = 100
 
-                        # replay traj for GR
-                        x_rel_ = memory_seq[2].cuda()
-                        y_rel_ = memory_seq[3].cuda()
-                        seq_start_end_ = memory_seq[4].cuda()
+                            # replay traj for GR
+                            x_rel_ = memory_seq[2].cuda()
+                            y_rel_ = memory_seq[3].cuda()
+                            seq_start_end_ = memory_seq[4].cuda()
                         
                     previous_model.eval()
                     if args.feedback==True:
@@ -321,15 +321,16 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
 
 
                 # -----> Train Generator
-                if generator is not None and batch_index <= gen_iters*batch_num:   # 这是说明，同一次batch经过时，先train model 再train generator，有可能出现model停了，generator继续train的情况（dataloader没放完的情况）
-                    # when replay through feedback, generator is None.##YZ
-                    # Train the generator with this batch
-                    loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_)
-                    losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
-                    losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
-                    losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])
-                    losses_dict_generative['reconL_r'].append(loss_dict_generative['reconL_r'])
-                    losses_dict_generative['variatL_r'].append(loss_dict_generative['variatL_r'])
+                if args.SGR_hidden == False: # when SGR_hidden is false, generator train is at the same time with model train.(if hidden ==True, no generator,they combine)
+                    if generator is not None and batch_index <= gen_iters*batch_num:   # 这是说明，同一次batch经过时，先train model 再train generator，有可能出现model停了，generator继续train的情况（dataloader没放完的情况）
+                        # when replay through feedback, generator is None.##YZ
+                        # Train the generator with this batch
+                        loss_dict_generative = generator.train_a_batch(x_rel, y_rel, seq_start_end, x_=x_rel_, y_=y_rel_, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_)
+                        losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
+                        losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
+                        losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])
+                        losses_dict_generative['reconL_r'].append(loss_dict_generative['reconL_r'])
+                        losses_dict_generative['variatL_r'].append(loss_dict_generative['variatL_r'])
             
             # record each epoch losses. each element means loss of all batch losses of one epoch.
             if args.feedback == True:
@@ -618,13 +619,87 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
 
             # Generative model
             # Fire callbacks on each iteration
-            for loss_cb in gen_loss_cbs:
-                if loss_cb is not None:
-                    loss_cb(progress_gen, epoch, losses_dict_generative, task=task)
-            for sample_cb in sample_cbs:
-                if sample_cb is not None:
-                    sample_cb(generator, epoch, task=task)
+            if args.SGR_hidden == False:
+                for loss_cb in gen_loss_cbs:
+                    if loss_cb is not None:
+                        loss_cb(progress_gen, epoch, losses_dict_generative, task=task)
+                for sample_cb in sample_cbs:
+                    if sample_cb is not None:
+                        sample_cb(generator, epoch, task=task)
 
+        # if SGR_hidden == true, pure hidden replay will train generator after main model is trained.
+        if args.SGR_hidden == True and args.hidden==False:
+            # load current task best main model
+            filename = os.path.join(os.path.dirname(__file__),
+                                    "{method}_{replay}_{task}_model_{order}_{batch_size}_{seed}_{val}_{val_class}_{si}_{si_c}.path".format(
+                                                method=args.method, replay=args.replay, task=task,
+                                                order=args.dataset_order, batch_size=args.batch_size,
+                                                seed=args.seed,
+                                                val=args.val, val_class=args.val_class,
+                                                si=args.si, si_c=args.si_c))
+            from main_model.encoder import Predictor
+            cur_best_model = Predictor(
+                                        obs_len=args.obs_len,
+                                        pred_len=args.pred_len,
+                                        traj_lstm_input_size=args.traj_lstm_input_size,
+                                        traj_lstm_hidden_size=args.traj_lstm_hidden_size,
+                                        traj_lstm_output_size=args.traj_lstm_output_size
+                                    ).to(device)
+            checkpoint = torch.load(filename)
+            cur_best_model.load_state_dict(check_point['model_state_dict'])
+            # run through current best model get hidden state, which is used to train hidden level SGR
+            for epoch in range(1, iters_to_use+1):    
+                losses_dict_generative = {'loss_total':[], 'reconL':[], 'variatL':[], 'reconL_r':[], 'variatL_r':[]}
+                for batch_index, batch in enumerate(training_dataset):  # current dataset
+                    batch = [tensor.cuda() for tensor in batch]
+                    (
+                        obs_traj,
+                        pred_traj_gt,
+                        obs_traj_rel,
+                        pred_traj_gt_rel,
+                        non_linear_ped,
+                        loss_mask,
+                        seq_start_end,
+                    ) = batch
+
+                    x_rel = obs_traj_rel
+                    seq_start_end =seq_start_end
+                    # generate a batch of hidden state as train data for hidden SGR
+                    hidden_state,U_info = cur_best_model.generate_hidden(obs_traj_pos=x_rel,obs_traj=obs_traj,replay_seq_start_end=seq_start_end) # 你是不是要生成U info 和obs_traj_record啊
+                    # generate a batch of replay data and get hidden replay data
+                    obs_traj_record_cur = obs_traj.to(device)
+
+                    if Generative == True:
+                        replay_data_loader = iter(
+                        data_loader(args, train_dataset, args.replay_batch_size)) # 64 always# replay current dataset as example for sample and also for train VAE on current
+                        replay_out = next(replay_data_loader)
+                        obs_traj_record=replay_out[0].to(device)
+                        if args.replay_model == 'lstm':  # I only test on LSTM main model # sample的结果也应该是hidden
+                            decode_h,U_info = previous_generator.sample(replay_out[2].to(device), replay_out[0].to(device),
+                                                                replay_out[6].to(device),task_id_cur=task,out_hidden_flag=True)  #here previous_generator is actaully combined model's full part.
+                            hidden_state_replay = decode_h
+                            _,seq_start_end_,tasks_ = U_info
+
+                            # gate based method
+                            if args.gate_decoder == False:    
+                                tasks_=None 
+                    elif Generative == False:  # taskid  =1
+                        hidden_state_replay=None
+                        tasks_=None
+                        obs_traj_record=None
+                    loss_dict_generative = generator.train_a_batch(x_rel=hidden_state, y_rel=None, seq_start_end=seq_start_end, x_=hidden_state_replay, y_=None, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_,obs_traj_record=obs_traj_record,obs_traj_record_cur=obs_traj_record_cur,U_info=U_info)
+                    losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
+                    losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
+                    losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])
+                    losses_dict_generative['reconL_r'].append(loss_dict_generative['reconL_r'])
+                    losses_dict_generative['variatL_r'].append(loss_dict_generative['variatL_r'])
+                # every epoch use a callback
+                for loss_cb in gen_loss_cbs:
+                    if loss_cb is not None:
+                        loss_cb(progress_gen, epoch, losses_dict_generative, task=task)
+                for sample_cb in sample_cbs:
+                    if sample_cb is not None:
+                        sample_cb(generator, epoch, task=task)
         # ----> UPON FINISHING EACH TASK...
         # draw after a task finish all epoch
         if args.feedback == True:

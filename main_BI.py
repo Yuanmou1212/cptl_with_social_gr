@@ -128,7 +128,8 @@ batch_params.add_argument("--checkpoint_log", default=50, type=int, help="iters 
 BI_params = parser.add_argument_group('Brain inspired method parameters')
 BI_params.add_argument('--feedback',action='store_true',help= 'replay through feedback methdod ')
 #BI_params.add_argument('--feedback',action='store_false',help= 'replay through feedback methdod ')
-BI_params.add_argument('--hidden',action='store_true',help= 'internal replay')
+BI_params.add_argument('--hidden',action='store_true',help= 'internal replay based on replay through feedback')
+BI_params.add_argument('--SGR_hidden',action='store_true',help= 'internal replay based on orginal social generative replay')
 #BI_params.add_argument('--hidden',action='store_false',help= 'internal replay')
 BI_params.add_argument('--pre_train',action='store_true',help= 'use pre-train model')
 BI_params.add_argument('--init_weight',action="store_true",help ='initilize weight')
@@ -437,7 +438,7 @@ def run(args, verbose=False):                                   #verbose 输入�
                                             z_dim=args.z_dim,
                                             gate_decoder=args.gate_decoder,
                                             gate_prob=args.gate_prob,
-                                            tasks= tasks).to(device)
+                                            tasks= tasks,SGR_hidden=args.SGR_hidden).to(device)
                 # condition
                 if args.replay_model == 'condition':  # generate only future part.
                     from generative_model.vae_models import AutoEncoder

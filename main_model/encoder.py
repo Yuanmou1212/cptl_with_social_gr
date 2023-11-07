@@ -117,6 +117,36 @@ class Predictor(ContinualLearner, Replayer): # nn module 是 continual learner �
 
         return outputs
 
+    def generate_hidden(self,obs_traj_pos,obs_traj,replay_seq_start_end): # use main_model to generate hidden state info.
+        batch = obs_traj_pos.shape[1] #todo define the batch  # obs_traj_pos shape(20,64,2) 第二次（20,72,2）,3rd (20,107,2)     数字这么大也应证了是多个scene
+        traj_lstm_h_t, traj_lstm_c_t = self.init_encoder_traj_lstm(batch)   # (batch,32)  #  每次forward都要初始化的一个原因： 每个batch 的这个维度的size不同。 hidden state的size需要是（Batch，hidden-feature size）
+        # pred_lstm_h_t, pred_lstm_c_t = self.init_decoder_traj_lstm(batch)
+        pred_traj_pos = []
+        traj_lstm_hidden_states = []
+        pred_lstm_hidden_states = []
+
+        end_pos = obs_traj[-1]
+        replay_seq_start_end=replay_seq_start_end
+        tasks_=None # only go through, rather than sample
+        # encoder, calculate the hidden states
+
+        for i, input_t in enumerate(
+            obs_traj_pos[: self.obs_len].chunk(   ## ：Doc shows chunk() input should be chunks rather than size of one chunk. chunks=size0 of input, so we have same number(dim0 of input) of chunks 
+                obs_traj_pos[: self.obs_len].size(0), dim=0  # 就是把单个时间步的tensor[1,...]给提了出来（input_t)用来循环。 其实取切片也可以做到
+            )      # (1，batch, input_size)
+        ):
+            #print(input_t.shape)   # input shape ([1, 64, 2]) 后面的batch出现过 epoch([1, 72, 2]) torch.Size([1, 107, 2]) torch.Size([1, 143, 2]) 等等  （time，batch （ped），position ）
+            traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
+                input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)  # dim 0 of input_t is 1, use squeeze to remove this dim  # 初始化的值都是二维的 squeeze掉的只能是时间，按照LSTM 的输入要求来看。留下的是【batch，input_size】 
+            )
+            traj_lstm_hidden_states += [traj_lstm_h_t]  # same like .append()
+
+        
+        output = obs_traj_pos[self.obs_len-1]   ## index start from 0. so last observed data's index is obs_len-1 输入的轨迹中的最后一个值。（也就是decoder第一步输入的值）可观察的最后一个位置 （batch，pos）
+        hidden_state = traj_lstm_hidden_states[-1]  # last hidden state form encoder
+        U_info = (end_pos,replay_seq_start_end,tasks_)
+        return hidden_state,U_info
+
     def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, loss_mask=None, active_classes=None, rnt=0.5,U_info=None,obs_traj_record=None,task=None,tasks_=None):
         '''
         Train model for one batch ([x],[y]), possibly supplemented with replayed data ([x_], [y_]).

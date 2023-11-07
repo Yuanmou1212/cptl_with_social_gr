@@ -318,7 +318,7 @@ class Model_RTF(Replayer):
             
             elif input_not_hidden == False: # input is replay hidden state(when use internal replay)
                 final_encoder_h = obs_traj_pos  # when replay is input, obs_traj_pos is actually a hidden state
-                end_pos,_ = U_info
+                end_pos,_,_ = U_info
                 obs_traj_pos = obs_traj_record # when replay, trajectory here is used to decode, cause decode.py just want to get start_pos through it!
 
             ## Generator part (vae generator)
