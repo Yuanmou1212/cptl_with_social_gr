@@ -665,7 +665,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                     x_rel = obs_traj_rel
                     seq_start_end =seq_start_end
                     # generate a batch of hidden state as train data for hidden SGR
-                    hidden_state,U_info = cur_best_model.generate_hidden(obs_traj_pos=x_rel,obs_traj=obs_traj,replay_seq_start_end=seq_start_end) # 你是不是要生成U info 和obs_traj_record啊
+                    hidden_state,U_info_cur = cur_best_model.generate_hidden(obs_traj_pos=x_rel,obs_traj=obs_traj,replay_seq_start_end=seq_start_end) # 你是不是要生成U info 和obs_traj_record啊
                     # generate a batch of replay data and get hidden replay data
                     obs_traj_record_cur = obs_traj.to(device)
 
@@ -687,7 +687,7 @@ def train_cl(args, best_ade, model, train_datasets, val_datasets, replay_model="
                         hidden_state_replay=None
                         tasks_=None
                         obs_traj_record=None
-                    loss_dict_generative = generator.train_a_batch(x_rel=hidden_state, y_rel=None, seq_start_end=seq_start_end, x_=hidden_state_replay, y_=None, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_,obs_traj_record=obs_traj_record,obs_traj_record_cur=obs_traj_record_cur,U_info=U_info)
+                    loss_dict_generative = generator.train_a_batch(x_rel=hidden_state, y_rel=None, seq_start_end=seq_start_end, x_=hidden_state_replay, y_=None, seq_start_end_=seq_start_end_, rnt=1./task,task=task,tasks_=tasks_,obs_traj_record=obs_traj_record,obs_traj_record_cur=obs_traj_record_cur,U_info=U_info,U_info_cur=U_info_cur)
                     losses_dict_generative['loss_total'].append(loss_dict_generative['loss_total'])
                     losses_dict_generative['reconL'].append(loss_dict_generative['reconL'])
                     losses_dict_generative['variatL'].append(loss_dict_generative['variatL'])

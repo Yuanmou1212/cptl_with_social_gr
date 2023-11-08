@@ -125,10 +125,10 @@ def get_model(checkpoint):
             dropout=args.dropout, alpha=args.alpha, graph_lstm_hidden_size=args.graph_lstm_hidden_size
         ).to(device)
 
-    if args.gate_decoder== True:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
+    # if args.gate_decoder== True:
+    #     model.load_state_dict(checkpoint['model_state_dict'])
+    # else:
+    model.load_state_dict(checkpoint['model_state_dict'])
     model.cuda()
     model.eval()
     return model

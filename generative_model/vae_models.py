@@ -254,7 +254,7 @@ class AutoEncoder(Replayer):
     #     hD = self.fromZ(z)
 
 
-    def forward(self, obs_traj_pos, seq_start_end,gate_input=None,U_info=None,obs_traj_record=None,obs_traj_record_cur=None):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
+    def forward(self, obs_traj_pos, seq_start_end,gate_input=None,U_info=None,obs_traj_record=None):   # obs_traj_pos （seq_len, batch/ped, input_size(x,y)=2）  seq_start_end 指定这个batch的哪些ped是一组的，seq_start_end内有几个tuple也制定了一共有几组scene。
         if self.SGR_hidden == False:
             batch = obs_traj_pos.shape[1] #todo define the batch
             traj_lstm_h_t, traj_lstm_c_t = self.init_obs_traj_lstm(batch)
@@ -282,7 +282,7 @@ class AutoEncoder(Replayer):
         elif self.SGR_hidden == True: # input is hidden state.
             final_encoder_h = obs_traj_pos
             end_pos,_,_ = U_info
-            obs_traj_pos = obs_traj_record if obs_traj_record is not None else obs_traj_record_cur 
+            obs_traj_pos = obs_traj_record
 
         pool_h = self.pool_net(final_encoder_h, seq_start_end, end_pos)    # 压缩的信息意义是： 行人a考虑其他人对a的距离 以及 其他人对应的hidden state（历史轨迹行为） 后，经过MLP (考虑)，最被激活的代表 最需要考虑的特征。（可能反应的是b在身边很近但同方向，c从对面来很快且靠近...）
         # Construct input hidden states for decoder
@@ -425,7 +425,7 @@ class AutoEncoder(Replayer):
 
     ##------- TRAINING FUNCTIONS -------##
 
-    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, rnt=0.5,task=1,tasks_=None,obs_traj_record=None,U_info=None,obs_traj_record_cur=None):
+    def train_a_batch(self, x_rel, y_rel, seq_start_end, x_=None, y_=None, seq_start_end_=None, rnt=0.5,task=1,tasks_=None,obs_traj_record=None,U_info=None,obs_traj_record_cur=None,U_info_cur=None):
         '''Train model for one batch ([x],[y]),possibly supplemented with replayed data ([x_],[y_])
 
         [x]          <tensor> batch of past trajectory (could be None, in which case only 'replayed' data is used)
@@ -452,7 +452,7 @@ class AutoEncoder(Replayer):
             gate_input = task_tensor if self.gate_decoder else None
 
             # Run the model
-            recon_batch, mu, logvar, z,recon_hidden = self.forward(x_rel, seq_start_end,gate_input=gate_input,U_info=U_info,obs_traj_record=None,obs_traj_record_cur=obs_traj_record_cur)
+            recon_batch, mu, logvar, z,recon_hidden = self.forward(x_rel, seq_start_end,gate_input=gate_input,U_info=U_info_cur,obs_traj_record=obs_traj_record_cur)
             if self.SGR_hidden == True: # Now x_rel is hidden level 
                 recon = recon_hidden.unsqueeze(0)
                 x_temp = x_rel.unsqueeze(0)
